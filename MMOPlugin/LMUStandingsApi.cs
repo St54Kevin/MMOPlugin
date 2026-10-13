@@ -179,6 +179,18 @@ namespace MMOPlugin
             }
             else
             {
+                // The practice/qualifying gap fields default to zero when they
+                // are not calculated. Mark them unavailable so race getters
+                // use the race timing values from LMU instead.
+                for (int i = 0; i < newVehicles.Length; i++)
+                {
+                    if (newVehicles[i] == null)
+                        continue;
+
+                    newVehicles[i].PracticeQualifyingGap = -1.0;
+                    newVehicles[i].PracticeQualifyingInterval = -1.0;
+                }
+
                 CalculateRaceClassPositions(
                     newVehicles
                 );

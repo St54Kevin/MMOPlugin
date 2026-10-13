@@ -26,9 +26,21 @@ namespace MMOPlugin
 
         private const int ExpectedVehicleTelemetryRelativeSize = 1888;
 
+        private const int ExpectedTrackLimitsStepsOffset = 776;
+
         private const int ExpectedTimeGapCarAheadOffset = 780;
 
         private const int ExpectedTimeGapCarBehindOffset = 784;
+
+        private const int ExpectedLapStartETOffset = 24;
+
+        private const int ExpectedTyreCompFLOffset = 1089;
+
+        private const int ExpectedTyreCompFROffset = 1349;
+
+        private const int ExpectedTyreCompRLOffset = 1609;
+
+        private const int ExpectedTyreCompRROffset = 1869;
 
         private MemoryMappedFile _memoryMappedFile;
 
@@ -83,19 +95,19 @@ namespace MMOPlugin
                     );
 
                 int scoringInfoSize =
-                    Marshal.SizeOf(
-                        typeof(LMUScoringInfo)
-                    );
+                    Marshal.SizeOf(typeof(LMUScoringInfo));
 
                 int vehicleScoringSize =
-                    Marshal.SizeOf(
-                        typeof(LMUVehicleScoring)
-                    );
+                    Marshal.SizeOf(typeof(LMUVehicleScoring));
 
                 int telemetrySize =
-                    Marshal.SizeOf(
-                        typeof(LMUVehicleTelemetryRelative)
-                    );
+                    Marshal.SizeOf(typeof(LMUVehicleTelemetryRelative));
+
+                int trackLimitsStepsOffset =
+                    Marshal.OffsetOf(
+                        typeof(LMUVehicleTelemetryRelative),
+                        "mTrackLimitsSteps"
+                    ).ToInt32();
 
                 int timeGapAheadOffset =
                     Marshal.OffsetOf(
@@ -109,29 +121,62 @@ namespace MMOPlugin
                         "mTimeGapCarBehind"
                     ).ToInt32();
 
-                if (scoringInfoSize !=
-                        ExpectedScoringInfoSize ||
-                    vehicleScoringSize !=
-                        ExpectedVehicleScoringSize ||
-                    telemetrySize !=
-                        ExpectedVehicleTelemetryRelativeSize ||
-                    timeGapAheadOffset !=
-                        ExpectedTimeGapCarAheadOffset ||
-                    timeGapBehindOffset !=
-                        ExpectedTimeGapCarBehindOffset)
+                int lapStartETOffset =
+                    Marshal.OffsetOf(
+                        typeof(LMUVehicleTelemetryRelative),
+                        "mLapStartET"
+                    ).ToInt32();
+
+                int tyreCompFLOffset =
+                    Marshal.OffsetOf(
+                        typeof(LMUVehicleTelemetryRelative),
+                        "mTyreCompFL"
+                    ).ToInt32();
+
+                int tyreCompFROffset =
+                    Marshal.OffsetOf(
+                        typeof(LMUVehicleTelemetryRelative),
+                        "mTyreCompFR"
+                    ).ToInt32();
+
+                int tyreCompRLOffset =
+                    Marshal.OffsetOf(
+                        typeof(LMUVehicleTelemetryRelative),
+                        "mTyreCompRL"
+                    ).ToInt32();
+
+                int tyreCompRROffset =
+                    Marshal.OffsetOf(
+                        typeof(LMUVehicleTelemetryRelative),
+                        "mTyreCompRR"
+                    ).ToInt32();
+
+                if (scoringInfoSize != ExpectedScoringInfoSize ||
+                    vehicleScoringSize != ExpectedVehicleScoringSize ||
+                    telemetrySize != ExpectedVehicleTelemetryRelativeSize ||
+                    trackLimitsStepsOffset != ExpectedTrackLimitsStepsOffset ||
+                    timeGapAheadOffset != ExpectedTimeGapCarAheadOffset ||
+                    timeGapBehindOffset != ExpectedTimeGapCarBehindOffset ||
+                    lapStartETOffset != ExpectedLapStartETOffset ||
+                    tyreCompFLOffset != ExpectedTyreCompFLOffset ||
+                    tyreCompFROffset != ExpectedTyreCompFROffset ||
+                    tyreCompRLOffset != ExpectedTyreCompRLOffset ||
+                    tyreCompRROffset != ExpectedTyreCompRROffset)
                 {
                     throw new InvalidOperationException(
                         "LMU structure size/offset mismatch. " +
-                        "ScoringInfo=" +
-                        scoringInfoSize +
-                        ", VehicleScoring=" +
-                        vehicleScoringSize +
-                        ", Telemetry=" +
-                        telemetrySize +
-                        ", GapAheadOffset=" +
-                        timeGapAheadOffset +
-                        ", GapBehindOffset=" +
-                        timeGapBehindOffset
+                        "ScoringInfo=" + scoringInfoSize +
+                        ", VehicleScoring=" + vehicleScoringSize +
+                        ", Telemetry=" + telemetrySize +
+                        ", TrackLimitsStepsOffset=" + trackLimitsStepsOffset +
+                        ", GapAheadOffset=" + timeGapAheadOffset +
+                        ", GapBehindOffset=" + timeGapBehindOffset +
+                        ", LapStartETOffset=" + lapStartETOffset +
+                        ", TyreCompoundOffsets=" +
+                        tyreCompFLOffset + "," +
+                        tyreCompFROffset + "," +
+                        tyreCompRLOffset + "," +
+                        tyreCompRROffset
                     );
                 }
 
@@ -212,12 +257,11 @@ namespace MMOPlugin
             }
         }
 
-        public bool TryReadVehicleTelemetryRelative(
+        internal bool TryReadVehicleTelemetryRelative(
             int telemetryIndex,
             out LMUVehicleTelemetryRelative telemetry)
         {
-            telemetry =
-                new LMUVehicleTelemetryRelative();
+            telemetry = new LMUVehicleTelemetryRelative();
 
             if (!IsConnected ||
                 telemetryIndex < 0 ||
@@ -232,12 +276,10 @@ namespace MMOPlugin
                     ScoringOffset
                     + ExpectedScoringInfoSize
                     + ScoringStreamSize
-                    + ((long)MaxMappedVehicles *
-                       ExpectedVehicleScoringSize)
+                    + ((long)MaxMappedVehicles * ExpectedVehicleScoringSize)
                     + ResultsStreamSize
                     + TelemetryHeaderSize
-                    + ((long)telemetryIndex *
-                       ExpectedVehicleTelemetryRelativeSize);
+                    + ((long)telemetryIndex * ExpectedVehicleTelemetryRelativeSize);
 
                 telemetry =
                     ReadStruct<LMUVehicleTelemetryRelative>(
@@ -253,8 +295,7 @@ namespace MMOPlugin
             }
         }
 
-        private T ReadStruct<T>(
-            long offset)
+        private T ReadStruct<T>(long offset)
             where T : struct
         {
             int size =
@@ -305,8 +346,7 @@ namespace MMOPlugin
             }
         }
 
-        private void LogReadError(
-            Exception ex)
+        private void LogReadError(Exception ex)
         {
             _lastError =
                 ex.GetType().Name +
@@ -334,15 +374,21 @@ namespace MMOPlugin
             CloseHandles();
         }
     }
+}
 
-    [StructLayout(
-        LayoutKind.Explicit,
-        Pack = 4,
-        Size = 1888)]
-    public struct LMUVehicleTelemetryRelative
+namespace MMOPlugin
+{
+    [StructLayout(LayoutKind.Explicit, Pack = 4, Size = 1888)]
+    internal struct LMUVehicleTelemetryRelative
     {
         [FieldOffset(0)]
         public int mID;
+
+        [FieldOffset(24)]
+        public double mLapStartET;
+
+        [FieldOffset(776)]
+        public byte mTrackLimitsSteps;
 
         [FieldOffset(780)]
         public float mTimeGapCarAhead;
@@ -355,5 +401,17 @@ namespace MMOPlugin
 
         [FieldOffset(792)]
         public float mTimeGapPlaceBehind;
+
+        [FieldOffset(1089)]
+        public byte mTyreCompFL;
+
+        [FieldOffset(1349)]
+        public byte mTyreCompFR;
+
+        [FieldOffset(1609)]
+        public byte mTyreCompRL;
+
+        [FieldOffset(1869)]
+        public byte mTyreCompRR;
     }
 }
