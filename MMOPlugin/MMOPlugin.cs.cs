@@ -4,7 +4,14 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
+using System.IO.Compression;
+using System.Net;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using GameReaderCommon;
 using SimHub.Plugins;
 using System.Windows;
@@ -21,7 +28,7 @@ namespace MMOPlugin
     [PluginDescription("Extended Le Mans Ultimate standings data.")]
     public class MMOPlugin : IPlugin, IDataPlugin, IWPFSettingsV2
     {
-        public const string PluginVersion = "0.1.1";
+        public const string PluginVersion = "0.1.2.1";
 
         public PluginManager PluginManager { get; set; }
 
@@ -1353,6 +1360,7 @@ namespace MMOPlugin
 
     internal sealed class MMOPluginSettingsControl : UserControl
     {
+        private const string LatestReleaseApi = "https://api.github.com/repos/St54Kevin/MMOPlugin/releases/latest";
         private readonly PluginManager _pluginManager;
         private readonly List<string> _propertyNames;
         private readonly ObservableCollection<MMOPropertyDisplayItem> _displayedProperties =
@@ -1361,6 +1369,12 @@ namespace MMOPlugin
         private readonly ListView _propertyList;
         private readonly TextBlock _resultCount;
         private readonly DispatcherTimer _refreshTimer;
+        private readonly TextBlock _updateStatus;
+        private readonly Button _checkUpdateButton;
+        private readonly Button _installUpdateButton;
+        private GitHubRelease _latestRelease;
+        private bool _checkingUpdate;
+        private bool _installingUpdate;
 
         public MMOPluginSettingsControl(
             PluginManager pluginManager,
@@ -1369,62 +1383,150 @@ namespace MMOPlugin
         {
             _pluginManager = pluginManager;
             _propertyNames = propertyNames ?? new List<string>();
+            Background = Brushes.Transparent;
             _searchBox = new TextBox
             {
-                Margin = new Thickness(0, 8, 0, 8),
-                ToolTip = "Search MMO properties"
+                Margin = new Thickness(0, 0, 10, 0),
+                Padding = new Thickness(8, 5, 8, 5),
+                ToolTip = "Search MMO properties",
+                MinWidth = 220,
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             GridView propertyGrid = new GridView();
             propertyGrid.Columns.Add(new GridViewColumn
             {
                 Header = "Property",
-                Width = 390,
+                Width = 380,
                 DisplayMemberBinding = new Binding("Name")
             });
             propertyGrid.Columns.Add(new GridViewColumn
             {
                 Header = "Current value",
-                Width = 220,
+                Width = 190,
                 DisplayMemberBinding = new Binding("Value")
             });
             _propertyList = new ListView
             {
-                MinHeight = 420,
-                MaxHeight = 700,
                 View = propertyGrid,
-                ItemsSource = _displayedProperties
+                ItemsSource = _displayedProperties,
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(0),
+                FontSize = 12
             };
             VirtualizingPanel.SetIsVirtualizing(_propertyList, true);
             _resultCount = new TextBlock
             {
-                Margin = new Thickness(0, 0, 0, 8),
-                Opacity = 0.75
+                Margin = new Thickness(0, 0, 0, 7),
+                Opacity = 0.7,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 11
             };
 
-            StackPanel content = new StackPanel
+            _updateStatus = new TextBlock
             {
-                Margin = new Thickness(18)
+                Text = "Checking GitHub releases…",
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 12, 0),
+                FontSize = 12
+            };
+            _checkUpdateButton = new Button
+            {
+                Content = "Check",
+                Padding = new Thickness(10, 5, 10, 5),
+                MinWidth = 72,
+                Margin = new Thickness(0, 0, 7, 0)
+            };
+            _installUpdateButton = new Button
+            {
+                Content = "Update",
+                Padding = new Thickness(10, 5, 10, 5),
+                MinWidth = 76,
+                Visibility = Visibility.Collapsed,
+                IsEnabled = false
             };
 
-            content.Children.Add(new TextBlock
+            Grid root = new Grid
+            {
+                Margin = new Thickness(12)
+            };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            Border header = new Border
+            {
+                Padding = new Thickness(0, 0, 0, 10),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(70, 75, 83)),
+                BorderThickness = new Thickness(0, 0, 0, 1)
+            };
+            DockPanel headerLayout = new DockPanel { LastChildFill = true };
+            TextBlock currentVersion = new TextBlock
+            {
+                Text = "v" + (version ?? ""),
+                Opacity = 0.72,
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(currentVersion, Dock.Right);
+            headerLayout.Children.Add(currentVersion);
+            StackPanel titleGroup = new StackPanel { Orientation = Orientation.Horizontal };
+            Image pluginLogo = new Image
+            {
+                Source = new System.Windows.Media.Imaging.BitmapImage(
+                    new Uri(
+                        "pack://application:,,,/MMOPlugin;component/rsz_logo_transp.png",
+                        UriKind.Absolute
+                    )
+                ),
+                Width = 38,
+                Height = 38,
+                Stretch = Stretch.Uniform,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0),
+                ToolTip = "MMO Plugin by Kevin_Karas"
+            };
+            titleGroup.Children.Add(pluginLogo);
+            titleGroup.Children.Add(new TextBlock
             {
                 Text = "MMO Plugin",
-                FontSize = 22,
+                FontSize = 18,
                 FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, 0, 0, 4)
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0)
             });
-
-            content.Children.Add(new TextBlock
+            titleGroup.Children.Add(new TextBlock
             {
-                Text = "Version " + (version ?? ""),
-                Margin = new Thickness(0, 0, 0, 4)
+                Text = "Kevin_Karas",
+                Opacity = 0.65,
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
             });
+            headerLayout.Children.Add(titleGroup);
+            header.Child = headerLayout;
+            Grid.SetRow(header, 0);
+            root.Children.Add(header);
 
-            content.Children.Add(new TextBlock
+            Border updateCard = new Border
             {
-                Text = "Author: Kevin_Karas",
-                Margin = new Thickness(0, 0, 0, 4)
-            });
+                Margin = new Thickness(0, 9, 0, 10),
+                Padding = new Thickness(10, 8, 10, 8),
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(70, 75, 83)),
+                Background = new SolidColorBrush(Color.FromArgb(28, 128, 128, 128))
+            };
+            DockPanel updateLayout = new DockPanel { LastChildFill = true };
+            StackPanel updateButtons = new StackPanel { Orientation = Orientation.Horizontal };
+            updateButtons.Children.Add(_checkUpdateButton);
+            updateButtons.Children.Add(_installUpdateButton);
+            DockPanel.SetDock(updateButtons, Dock.Right);
+            updateLayout.Children.Add(updateButtons);
+            updateLayout.Children.Add(_updateStatus);
+            updateCard.Child = updateLayout;
+            Grid.SetRow(updateCard, 1);
+            root.Children.Add(updateCard);
 
             System.Windows.Documents.Hyperlink downloadLink =
                 new System.Windows.Documents.Hyperlink(
@@ -1439,24 +1541,58 @@ namespace MMOPlugin
                 };
             downloadLink.RequestNavigate += DownloadLink_RequestNavigate;
 
+            System.Windows.Documents.Hyperlink releasesLink =
+                new System.Windows.Documents.Hyperlink(
+                    new System.Windows.Documents.Run("GitHub releases")
+                )
+                {
+                    NavigateUri = new Uri("https://github.com/St54Kevin/MMOPlugin/releases")
+                };
+            releasesLink.RequestNavigate += DownloadLink_RequestNavigate;
+
             TextBlock downloadLine = new TextBlock
             {
-                Margin = new Thickness(0, 0, 0, 16)
+                Margin = new Thickness(0, 0, 0, 8),
+                FontSize = 11,
+                Opacity = 0.82
             };
             downloadLine.Inlines.Add(downloadLink);
-            content.Children.Add(downloadLine);
-
-            content.Children.Add(new TextBlock
+            downloadLine.Inlines.Add(new System.Windows.Documents.Run("  ·  "));
+            downloadLine.Inlines.Add(releasesLink);
+            StackPanel propertyHeading = new StackPanel
             {
-                Text = "Search MMO properties",
-                FontWeight = FontWeights.SemiBold
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 0, 0, 3)
+            };
+            propertyHeading.Children.Add(new TextBlock
+            {
+                Text = "Properties",
+                FontWeight = FontWeights.SemiBold,
+                FontSize = 14,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0)
             });
-
-            content.Children.Add(_searchBox);
-            content.Children.Add(_resultCount);
-            content.Children.Add(_propertyList);
+            propertyHeading.Children.Add(_resultCount);
+            Grid propertyArea = new Grid();
+            propertyArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            propertyArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            propertyArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            propertyArea.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            Grid.SetRow(downloadLine, 0);
+            Grid.SetRow(propertyHeading, 1);
+            Grid.SetRow(_searchBox, 2);
+            Grid.SetRow(_propertyList, 3);
+            propertyArea.Children.Add(downloadLine);
+            propertyArea.Children.Add(propertyHeading);
+            propertyArea.Children.Add(_searchBox);
+            propertyArea.Children.Add(_propertyList);
+            Grid.SetRow(propertyArea, 2);
+            Grid.SetRowSpan(propertyArea, 2);
+            root.Children.Add(propertyArea);
 
             _searchBox.TextChanged += SearchBox_TextChanged;
+            _checkUpdateButton.Click += CheckUpdateButton_Click;
+            _installUpdateButton.Click += InstallUpdateButton_Click;
             Loaded += SettingsControl_Loaded;
             Unloaded += SettingsControl_Unloaded;
 
@@ -1468,7 +1604,7 @@ namespace MMOPlugin
             };
             _refreshTimer.Tick += RefreshTimer_Tick;
 
-            Content = content;
+            Content = root;
             ApplyPropertyFilter();
         }
 
@@ -1556,6 +1692,8 @@ namespace MMOPlugin
         {
             RefreshCurrentValues();
             _refreshTimer.Start();
+            if (!_checkingUpdate && _latestRelease == null)
+                CheckForUpdatesAsync();
         }
 
         private void SettingsControl_Unloaded(
@@ -1579,6 +1717,263 @@ namespace MMOPlugin
             Process.Start(e.Uri.AbsoluteUri);
             e.Handled = true;
         }
+
+        private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
+        {
+            await CheckForUpdatesAsync();
+        }
+
+        private async Task CheckForUpdatesAsync()
+        {
+            if (_checkingUpdate)
+                return;
+            _checkingUpdate = true;
+            _checkUpdateButton.IsEnabled = false;
+            _updateStatus.Text = "Checking GitHub releases…";
+            _updateStatus.Foreground = SystemColors.ControlTextBrush;
+            _installUpdateButton.Visibility = Visibility.Collapsed;
+            try
+            {
+                GitHubRelease release = await Task.Run(LoadLatestRelease);
+                Version available;
+                Version installed;
+                if (release == null ||
+                    (!TryParseVersion(release.TagName, out available) &&
+                     !TryParseVersion(release.Name, out available)))
+                {
+                    _updateStatus.Text = "No usable release found. Open GitHub releases.";
+                    _latestRelease = null;
+                    return;
+                }
+                _latestRelease = release;
+                Version.TryParse(MMOPlugin.PluginVersion, out installed);
+                if (installed == null || available > installed)
+                {
+                    _updateStatus.Foreground = SystemColors.ControlTextBrush;
+                    _updateStatus.Text = "Update available · v" + available.ToString();
+                    _installUpdateButton.Visibility = Visibility.Visible;
+                    _installUpdateButton.IsEnabled = FindPluginAsset(release) != null;
+                    if (!_installUpdateButton.IsEnabled)
+                        _updateStatus.Text += " · release has no MMOPlugin.dll/.zip asset";
+                }
+                else
+                {
+                    _updateStatus.Text = "Already up to date · v" + MMOPlugin.PluginVersion;
+                    _updateStatus.Foreground = Brushes.LightGreen;
+                    _latestRelease = null;
+                }
+            }
+            catch (WebException ex)
+            {
+                HttpWebResponse response = ex.Response as HttpWebResponse;
+                if (response != null && response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    response.Close();
+                    _updateStatus.Text = "No public GitHub release found yet. See GitHub releases.";
+                    _updateStatus.Foreground = SystemColors.ControlTextBrush;
+                    _latestRelease = null;
+                }
+                else
+                {
+                    _updateStatus.Text = "Could not check for updates: " + ex.Message;
+                    _updateStatus.Foreground = SystemColors.ControlTextBrush;
+                    _latestRelease = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _updateStatus.Text = "Could not check for updates: " + ex.Message;
+                _updateStatus.Foreground = SystemColors.ControlTextBrush;
+                _latestRelease = null;
+            }
+            finally
+            {
+                _checkingUpdate = false;
+                _checkUpdateButton.IsEnabled = true;
+            }
+        }
+
+        private static GitHubRelease LoadLatestRelease()
+        {
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(LatestReleaseApi);
+            request.UserAgent = "MMOPlugin-Updater/" + MMOPlugin.PluginVersion;
+            request.Accept = "application/vnd.github+json";
+            request.Timeout = 15000;
+            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+            using (Stream stream = response.GetResponseStream())
+            {
+                DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(GitHubRelease));
+                return (GitHubRelease)serializer.ReadObject(stream);
+            }
+        }
+
+        private static bool TryParseVersion(string text, out Version version)
+        {
+            string normalized = (text ?? "").Trim();
+            while (normalized.Length > 0 && (normalized[0] == 'v' || normalized[0] == 'V'))
+                normalized = normalized.Substring(1);
+            int suffix = normalized.IndexOfAny(new[] { '-', '+' });
+            if (suffix >= 0)
+                normalized = normalized.Substring(0, suffix);
+            if (Version.TryParse(normalized, out version))
+                return true;
+
+            Match match = Regex.Match(
+                text ?? "",
+                @"(?<!\d)v?(\d+\.\d+(?:\.\d+){0,2})",
+                RegexOptions.IgnoreCase
+            );
+            return match.Success && Version.TryParse(match.Groups[1].Value, out version);
+        }
+
+        private static GitHubReleaseAsset FindPluginAsset(GitHubRelease release)
+        {
+            if (release == null || release.Assets == null)
+                return null;
+            foreach (GitHubReleaseAsset asset in release.Assets)
+            {
+                string name = asset.Name ?? "";
+                if (string.Equals(name, "MMOPlugin.dll", StringComparison.OrdinalIgnoreCase) ||
+                    (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) &&
+                     name.IndexOf("MMOPlugin", StringComparison.OrdinalIgnoreCase) >= 0))
+                    return asset;
+            }
+            return null;
+        }
+
+        private async void InstallUpdateButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_installingUpdate || _latestRelease == null)
+                return;
+            GitHubReleaseAsset asset = FindPluginAsset(_latestRelease);
+            if (asset == null)
+                return;
+            _installingUpdate = true;
+            _installUpdateButton.IsEnabled = false;
+            _checkUpdateButton.IsEnabled = false;
+            _updateStatus.Text = "Downloading update…";
+            try
+            {
+                string target = typeof(MMOPlugin).Assembly.Location;
+                string tempDirectory = Path.Combine(Path.GetTempPath(), "MMOPluginUpdate");
+                Directory.CreateDirectory(tempDirectory);
+                string downloaded = Path.Combine(tempDirectory, Path.GetFileName(asset.Name));
+                using (WebClient client = new WebClient())
+                {
+                    client.Headers[HttpRequestHeader.UserAgent] = "MMOPlugin-Updater/" + MMOPlugin.PluginVersion;
+                    await client.DownloadFileTaskAsync(new Uri(asset.DownloadUrl), downloaded);
+                }
+                string stagedDll = downloaded;
+                if (downloaded.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    string extractDirectory = Path.Combine(tempDirectory, "package");
+                    if (Directory.Exists(extractDirectory))
+                        Directory.Delete(extractDirectory, true);
+                    ZipFile.ExtractToDirectory(downloaded, extractDirectory);
+                    string[] dlls = Directory.GetFiles(extractDirectory, "MMOPlugin.dll", SearchOption.AllDirectories);
+                    if (dlls.Length == 0)
+                        throw new InvalidDataException("The release archive does not contain MMOPlugin.dll.");
+                    stagedDll = dlls[0];
+                }
+                if (!File.Exists(stagedDll) || !string.Equals(Path.GetFileName(stagedDll), "MMOPlugin.dll", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("The downloaded release is not an MMOPlugin.dll or supported ZIP package.");
+
+                MessageBoxResult confirmation = ShowUpdateRestartConfirmation();
+                if (confirmation != MessageBoxResult.Yes)
+                {
+                    _updateStatus.Text = "Update downloaded. SimHub will restart only after you confirm.";
+                    _installingUpdate = false;
+                    _installUpdateButton.IsEnabled = true;
+                    _checkUpdateButton.IsEnabled = true;
+                    return;
+                }
+
+                StartUpdater(stagedDll, target);
+                _updateStatus.Text = "Update downloaded. SimHub will restart to install it.";
+                _pluginManager.RequestApplicationExit(false);
+            }
+            catch (Exception ex)
+            {
+                _updateStatus.Text = "Update failed: " + ex.Message;
+                _installingUpdate = false;
+                _installUpdateButton.IsEnabled = true;
+                _checkUpdateButton.IsEnabled = true;
+            }
+        }
+
+        private MessageBoxResult ShowUpdateRestartConfirmation()
+        {
+            const string message =
+                "The update has been downloaded. SimHub must close and restart to install it. Continue?";
+            Window owner = Window.GetWindow(this);
+            return owner != null
+                ? MessageBox.Show(
+                    owner,
+                    message,
+                    "MMO Plugin update",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information
+                )
+                : MessageBox.Show(
+                    message,
+                    "MMO Plugin update",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information
+                );
+        }
+
+        private void StartUpdater(string stagedDll, string targetDll)
+        {
+            string executable = Process.GetCurrentProcess().MainModule.FileName;
+            string script = Path.Combine(Path.GetTempPath(), "MMOPluginUpdate", "install-update.ps1");
+            string scriptText =
+                "$ErrorActionPreference = 'Stop'\r\n" +
+                "$processId = [int]$args[0]\r\n$staged = $args[1]\r\n$target = $args[2]\r\n$app = $args[3]\r\n" +
+                "try { Wait-Process -Id $processId -Timeout 120 } catch {}\r\n" +
+                "Start-Sleep -Milliseconds 700\r\n" +
+                "$backup = $target + '.bak'\r\nif (Test-Path $backup) { Remove-Item -LiteralPath $backup -Force }\r\n" +
+                "Copy-Item -LiteralPath $target -Destination $backup -Force\r\n" +
+                "Copy-Item -LiteralPath $staged -Destination $target -Force\r\n" +
+                "$work = Split-Path -Parent $app\r\n" +
+                "Start-Process -FilePath $app -WorkingDirectory $work\r\n";
+            File.WriteAllText(script, scriptText, new UTF8Encoding(false));
+            ProcessStartInfo start = new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell\\v1.0\\powershell.exe"),
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " + QuoteArgument(script) +
+                    " " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture) +
+                    " " + QuoteArgument(stagedDll) + " " + QuoteArgument(targetDll) + " " + QuoteArgument(executable),
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+            Process.Start(start);
+        }
+
+        private static string QuoteArgument(string value)
+        {
+            return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
+        }
+    }
+
+    [DataContract]
+    internal sealed class GitHubRelease
+    {
+        [DataMember(Name = "tag_name")]
+        public string TagName { get; set; }
+        [DataMember(Name = "name")]
+        public string Name { get; set; }
+        [DataMember(Name = "assets")]
+        public GitHubReleaseAsset[] Assets { get; set; }
+    }
+
+    [DataContract]
+    internal sealed class GitHubReleaseAsset
+    {
+        [DataMember(Name = "name")]
+        public string Name { get; set; }
+        [DataMember(Name = "browser_download_url")]
+        public string DownloadUrl { get; set; }
     }
 
     internal sealed class MMOPropertyDisplayItem : INotifyPropertyChanged
