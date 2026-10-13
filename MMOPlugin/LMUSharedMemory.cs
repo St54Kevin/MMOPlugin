@@ -14,9 +14,21 @@ namespace MMOPlugin
 
         private const int MaxVehicles = 62;
 
+        private const int MaxMappedVehicles = 104;
+
+        private const int ResultsStreamSize = 65536;
+
+        private const int TelemetryHeaderSize = 4;
+
         private const int ExpectedScoringInfoSize = 548;
 
         private const int ExpectedVehicleScoringSize = 584;
+
+        private const int ExpectedVehicleTelemetryRelativeSize = 1888;
+
+        private const int ExpectedTimeGapCarAheadOffset = 780;
+
+        private const int ExpectedTimeGapCarBehindOffset = 784;
 
         private MemoryMappedFile _memoryMappedFile;
 
@@ -71,18 +83,55 @@ namespace MMOPlugin
                     );
 
                 int scoringInfoSize =
-                    Marshal.SizeOf(typeof(LMUScoringInfo));
+                    Marshal.SizeOf(
+                        typeof(LMUScoringInfo)
+                    );
 
                 int vehicleScoringSize =
-                    Marshal.SizeOf(typeof(LMUVehicleScoring));
+                    Marshal.SizeOf(
+                        typeof(LMUVehicleScoring)
+                    );
 
-                if (scoringInfoSize != ExpectedScoringInfoSize ||
-                    vehicleScoringSize != ExpectedVehicleScoringSize)
+                int telemetrySize =
+                    Marshal.SizeOf(
+                        typeof(LMUVehicleTelemetryRelative)
+                    );
+
+                int timeGapAheadOffset =
+                    Marshal.OffsetOf(
+                        typeof(LMUVehicleTelemetryRelative),
+                        "mTimeGapCarAhead"
+                    ).ToInt32();
+
+                int timeGapBehindOffset =
+                    Marshal.OffsetOf(
+                        typeof(LMUVehicleTelemetryRelative),
+                        "mTimeGapCarBehind"
+                    ).ToInt32();
+
+                if (scoringInfoSize !=
+                        ExpectedScoringInfoSize ||
+                    vehicleScoringSize !=
+                        ExpectedVehicleScoringSize ||
+                    telemetrySize !=
+                        ExpectedVehicleTelemetryRelativeSize ||
+                    timeGapAheadOffset !=
+                        ExpectedTimeGapCarAheadOffset ||
+                    timeGapBehindOffset !=
+                        ExpectedTimeGapCarBehindOffset)
                 {
                     throw new InvalidOperationException(
-                        "LMU structure size mismatch. " +
-                        "ScoringInfo=" + scoringInfoSize +
-                        ", VehicleScoring=" + vehicleScoringSize
+                        "LMU structure size/offset mismatch. " +
+                        "ScoringInfo=" +
+                        scoringInfoSize +
+                        ", VehicleScoring=" +
+                        vehicleScoringSize +
+                        ", Telemetry=" +
+                        telemetrySize +
+                        ", GapAheadOffset=" +
+                        timeGapAheadOffset +
+                        ", GapBehindOffset=" +
+                        timeGapBehindOffset
                     );
                 }
 
@@ -163,7 +212,49 @@ namespace MMOPlugin
             }
         }
 
-        private T ReadStruct<T>(long offset)
+        public bool TryReadVehicleTelemetryRelative(
+            int telemetryIndex,
+            out LMUVehicleTelemetryRelative telemetry)
+        {
+            telemetry =
+                new LMUVehicleTelemetryRelative();
+
+            if (!IsConnected ||
+                telemetryIndex < 0 ||
+                telemetryIndex >= MaxMappedVehicles)
+            {
+                return false;
+            }
+
+            try
+            {
+                long telemetryOffset =
+                    ScoringOffset
+                    + ExpectedScoringInfoSize
+                    + ScoringStreamSize
+                    + ((long)MaxMappedVehicles *
+                       ExpectedVehicleScoringSize)
+                    + ResultsStreamSize
+                    + TelemetryHeaderSize
+                    + ((long)telemetryIndex *
+                       ExpectedVehicleTelemetryRelativeSize);
+
+                telemetry =
+                    ReadStruct<LMUVehicleTelemetryRelative>(
+                        telemetryOffset
+                    );
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogReadError(ex);
+                return false;
+            }
+        }
+
+        private T ReadStruct<T>(
+            long offset)
             where T : struct
         {
             int size =
@@ -214,7 +305,8 @@ namespace MMOPlugin
             }
         }
 
-        private void LogReadError(Exception ex)
+        private void LogReadError(
+            Exception ex)
         {
             _lastError =
                 ex.GetType().Name +
@@ -241,5 +333,27 @@ namespace MMOPlugin
         {
             CloseHandles();
         }
+    }
+
+    [StructLayout(
+        LayoutKind.Explicit,
+        Pack = 4,
+        Size = 1888)]
+    public struct LMUVehicleTelemetryRelative
+    {
+        [FieldOffset(0)]
+        public int mID;
+
+        [FieldOffset(780)]
+        public float mTimeGapCarAhead;
+
+        [FieldOffset(784)]
+        public float mTimeGapCarBehind;
+
+        [FieldOffset(788)]
+        public float mTimeGapPlaceAhead;
+
+        [FieldOffset(792)]
+        public float mTimeGapPlaceBehind;
     }
 }
