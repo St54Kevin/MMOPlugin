@@ -28,7 +28,14 @@ namespace MMOPlugin
     [PluginDescription("Extended Le Mans Ultimate standings data.")]
     public class MMOPlugin : IPlugin, IDataPlugin, IWPFSettingsV2
     {
-        public const string PluginVersion = "0.1.2.1";
+        public const string PluginVersion = "1.2.2.9";
+        private static readonly string SettingsFilePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SimHub",
+            "PluginsData",
+            "MMOPlugin",
+            "settings.ini"
+        );
 
         public PluginManager PluginManager { get; set; }
 
@@ -59,6 +66,9 @@ namespace MMOPlugin
         private LMUScoringInfo _scoringInfo;
 
         private bool _hasScoringInfo;
+        private volatile bool _showTeamNamesInsteadOfDriverNames;
+        private volatile bool _additionalTeamNamesInRelative;
+        private volatile int _tyreCompoundSymbolMode;
 
         private readonly string[] _relativeAhead = new string[3];
         private readonly string[] _relativeBehind = new string[3];
@@ -81,6 +91,7 @@ namespace MMOPlugin
         public void Init(PluginManager pluginManager)
         {
             PluginManager = pluginManager;
+            LoadPluginSettings();
 
             _standingsApi.Start();
             ClearTrackLimitPoints();
@@ -121,6 +132,21 @@ namespace MMOPlugin
                 name: "MMO_ApiLastError",
                 valueProvider: () =>
                     _standingsApi.LastError
+            );
+
+            this.AttachDelegate(
+                name: "MMO_SettingsShowTeamNamesInLeaderboard",
+                valueProvider: () => _showTeamNamesInsteadOfDriverNames ? 1 : 0
+            );
+
+            this.AttachDelegate(
+                name: "MMO_SettingsAdditionalTeamNamesInRelative",
+                valueProvider: () => _additionalTeamNamesInRelative ? 1 : 0
+            );
+
+            this.AttachDelegate(
+                name: "MMO_SettingsTyreCompoundSymbol",
+                valueProvider: () => _tyreCompoundSymbolMode
             );
 
             this.AttachDelegate(
@@ -188,6 +214,8 @@ namespace MMOPlugin
                 name: "MMO_RelativeBehind3",
                 valueProvider: () => _relativeBehind[2]
             );
+
+            RegisterPlayerProperties();
 
             for (int position = 1;
                  position <= MaxVehicles;
@@ -302,9 +330,29 @@ namespace MMOPlugin
                                 capturedPosition
                             );
 
-                        return vehicle != null
-                            ? vehicle.DriverName ?? ""
-                            : "";
+                        if (vehicle == null)
+                            return "";
+
+                        return _showTeamNamesInsteadOfDriverNames
+                            ? vehicle.TeamName ?? ""
+                            : FormatDriverName(vehicle.DriverName);
+                    }
+                );
+
+                this.AttachDelegate(
+                    name: "MMO_Position" + positionName + "DriveNameRelative",
+                    valueProvider: () =>
+                    {
+                        LMUApiVehicle vehicle =
+                            _standingsApi.GetVehicleByPosition(capturedPosition);
+
+                        if (vehicle == null)
+                            return "";
+
+                        string driverName = vehicle.DriverName ?? "";
+                        return _additionalTeamNamesInRelative
+                            ? FormatRelativeDriverName(driverName, vehicle.TeamName)
+                            : driverName;
                     }
                 );
 
@@ -591,14 +639,293 @@ namespace MMOPlugin
             }
         }
 
+        private bool TryGetPlayerScoring(
+            out int position,
+            out LMUVehicleScoring scoringVehicle)
+        {
+            for (int i = 0; i < MaxVehicles; i++)
+            {
+                if (_hasVehicle[i] && _vehiclesByPosition[i].mIsPlayer)
+                {
+                    position = i + 1;
+                    scoringVehicle = _vehiclesByPosition[i];
+                    return true;
+                }
+            }
+
+            position = 0;
+            scoringVehicle = new LMUVehicleScoring();
+            return false;
+        }
+
+        private LMUApiVehicle GetPlayerApiVehicle(out int position)
+        {
+            LMUVehicleScoring ignored;
+            if (!TryGetPlayerScoring(out position, out ignored))
+                return null;
+
+            return _standingsApi.GetVehicleByPosition(position);
+        }
+
+        private void RegisterPlayerProperties()
+        {
+            this.AttachDelegate("MMO_PlayerRelativeAhead1", () => _relativeAhead[0]);
+            this.AttachDelegate("MMO_PlayerRelativeAhead2", () => _relativeAhead[1]);
+            this.AttachDelegate("MMO_PlayerRelativeAhead3", () => _relativeAhead[2]);
+            this.AttachDelegate("MMO_PlayerRelativeBehind1", () => _relativeBehind[0]);
+            this.AttachDelegate("MMO_PlayerRelativeBehind2", () => _relativeBehind[1]);
+            this.AttachDelegate("MMO_PlayerRelativeBehind3", () => _relativeBehind[2]);
+
+            this.AttachDelegate("MMO_PlayerOverall", () =>
+            {
+                int position;
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out position);
+                return vehicle != null ? vehicle.Position : position;
+            });
+            this.AttachDelegate("MMO_PlayerClass", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                return vehicle != null ? vehicle.PositionClass : 0;
+            });
+            this.AttachDelegate("MMO_PlayerCarNumber", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                return vehicle != null ? vehicle.CarNumber ?? "" : "";
+            });
+            this.AttachDelegate("MMO_PlayerCarClass", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                return vehicle != null ? vehicle.CarClass ?? "" : "";
+            });
+
+            string[] wheelNames = { "FL", "FR", "RL", "RR" };
+            for (int wheel = 0; wheel < wheelNames.Length; wheel++)
+            {
+                int capturedWheel = wheel;
+                this.AttachDelegate(
+                    "MMO_PlayerTyreComp" + wheelNames[wheel],
+                    () =>
+                    {
+                        int position;
+                        return TryGetPlayerScoring(out position, out _)
+                            ? GetTyreCompound(position, capturedWheel)
+                            : "";
+                    }
+                );
+            }
+
+            this.AttachDelegate("MMO_PlayerDriverName", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                if (vehicle == null) return "";
+                return _showTeamNamesInsteadOfDriverNames
+                    ? vehicle.TeamName ?? ""
+                    : FormatDriverName(vehicle.DriverName);
+            });
+            this.AttachDelegate("MMO_PlayerDriveNameRelative", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                if (vehicle == null) return "";
+                string driverName = vehicle.DriverName ?? "";
+                return _additionalTeamNamesInRelative
+                    ? FormatRelativeDriverName(driverName, vehicle.TeamName)
+                    : driverName;
+            });
+            this.AttachDelegate("MMO_PlayerTeamName", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                return vehicle != null ? vehicle.TeamName ?? "" : "";
+            });
+            this.AttachDelegate("MMO_PlayerBestLaptime", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                return vehicle != null ? vehicle.BestLapTime : 0.0;
+            });
+            this.AttachDelegate("MMO_PlayerLastLaptime", () =>
+            {
+                int position;
+                LMUVehicleScoring scoring;
+                if (!TryGetPlayerScoring(out position, out scoring))
+                    return FormatLapTime(0.0);
+
+                double lastLap = scoring.mLastLapTime;
+                if (lastLap > 0.0 && !double.IsNaN(lastLap) && !double.IsInfinity(lastLap))
+                    return FormatLapTime(lastLap);
+
+                LastLapTimingState timing;
+                if (_lastLapTimingByVehicleId.TryGetValue(scoring.mID, out timing) &&
+                    timing.LastLapTime > 0.0 && !double.IsNaN(timing.LastLapTime) &&
+                    !double.IsInfinity(timing.LastLapTime))
+                    return FormatLapTime(timing.LastLapTime);
+
+                LMUApiVehicle vehicle = _standingsApi.GetVehicleByPosition(position);
+                lastLap = vehicle != null ? vehicle.LastLapTime : 0.0;
+                return lastLap > 0.0 && !double.IsNaN(lastLap) && !double.IsInfinity(lastLap)
+                    ? FormatLapTime(lastLap)
+                    : FormatLapTime(0.0);
+            });
+            this.AttachDelegate("MMO_PlayerGapToLeader", () =>
+            {
+                int position;
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out position);
+                return vehicle != null
+                    ? FormatGap(vehicle.GapToLeader, GetLapsBehindClassLeader(position, vehicle))
+                    : "";
+            });
+            this.AttachDelegate("MMO_PlayerIntervalToNext", () =>
+            {
+                int position;
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out position);
+                return vehicle != null
+                    ? FormatGap(vehicle.IntervalToNext, GetLapsBehindNext(position))
+                    : "";
+            });
+            this.AttachDelegate("MMO_PlayerPitStatus", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                if (vehicle == null) return "onTrack";
+                if (vehicle.InGarageStall) return "InGarage";
+                if (vehicle.Pitting) return "InPit";
+                return !string.IsNullOrEmpty(vehicle.PitState) &&
+                       !string.Equals(vehicle.PitState, "NONE", StringComparison.OrdinalIgnoreCase)
+                    ? "inPitLane"
+                    : "onTrack";
+            });
+            this.AttachDelegate("MMO_PlayerVirtualEnergy", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                return vehicle != null
+                    ? FormatVirtualEnergy(vehicle.VeFraction, vehicle.FuelFraction)
+                    : "";
+            });
+            this.AttachDelegate("MMO_PlayerPenalties", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                return vehicle != null ? vehicle.Penalties : 0;
+            });
+            this.AttachDelegate("MMO_PlayerIncidents", () => _playerIncidents);
+            this.AttachDelegate("MMO_PlayerInvalidLap", () =>
+            {
+                int position;
+                LMUVehicleScoring scoring;
+                return TryGetPlayerScoring(out position, out scoring) && scoring.mLastLapTime < 0.0
+                    ? 1
+                    : 0;
+            });
+            this.AttachDelegate("MMO_PlayerFinishStatus", () =>
+            {
+                LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
+                return vehicle != null && !string.IsNullOrEmpty(vehicle.FinishStatus) &&
+                       !string.Equals(vehicle.FinishStatus, "FSTAT_NONE", StringComparison.OrdinalIgnoreCase)
+                    ? 1
+                    : 0;
+            });
+        }
+
         public Control GetWPFSettingsControl(
             PluginManager pluginManager)
         {
             return new MMOPluginSettingsControl(
                 pluginManager,
                 PluginVersion,
-                BuildPropertyNames()
+                BuildPropertyNames(),
+                _showTeamNamesInsteadOfDriverNames,
+                SetShowTeamNamesInLeaderboard,
+                _additionalTeamNamesInRelative,
+                SetAdditionalTeamNamesInRelative,
+                _tyreCompoundSymbolMode,
+                SetTyreCompoundSymbolMode
             );
+        }
+
+        private void LoadPluginSettings()
+        {
+            _showTeamNamesInsteadOfDriverNames = false;
+            _additionalTeamNamesInRelative = false;
+            _tyreCompoundSymbolMode = 0;
+            try
+            {
+                if (!File.Exists(SettingsFilePath))
+                    return;
+
+                string[] lines = File.ReadAllLines(SettingsFilePath);
+                bool legacyValue;
+                if (lines.Length == 1 && bool.TryParse(lines[0].Trim(), out legacyValue))
+                {
+                    _showTeamNamesInsteadOfDriverNames = legacyValue;
+                    return;
+                }
+
+                foreach (string line in lines)
+                {
+                    int separator = line.IndexOf('=');
+                    if (separator < 0)
+                        continue;
+
+                    string key = line.Substring(0, separator).Trim();
+                    string settingValue = line.Substring(separator + 1).Trim();
+                    if (string.Equals(key, "TyreCompoundSymbol", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int mode;
+                        if (int.TryParse(settingValue, out mode) && mode >= 0 && mode <= 2)
+                            _tyreCompoundSymbolMode = mode;
+                        continue;
+                    }
+
+                    bool value;
+                    if (!bool.TryParse(settingValue, out value))
+                        continue;
+
+                    if (string.Equals(key, "ShowTeamNamesInLeaderboard", StringComparison.OrdinalIgnoreCase))
+                        _showTeamNamesInsteadOfDriverNames = value;
+                    else if (string.Equals(key, "AdditionalTeamNamesInRelative", StringComparison.OrdinalIgnoreCase))
+                        _additionalTeamNamesInRelative = value;
+                }
+            }
+            catch
+            {
+                _showTeamNamesInsteadOfDriverNames = false;
+                _additionalTeamNamesInRelative = false;
+                _tyreCompoundSymbolMode = 0;
+            }
+        }
+
+        private void SetShowTeamNamesInLeaderboard(bool value)
+        {
+            _showTeamNamesInsteadOfDriverNames = value;
+            SavePluginSettings();
+        }
+
+        private void SetAdditionalTeamNamesInRelative(bool value)
+        {
+            _additionalTeamNamesInRelative = value;
+            SavePluginSettings();
+        }
+
+        private void SetTyreCompoundSymbolMode(int value)
+        {
+            _tyreCompoundSymbolMode = value >= 0 && value <= 2 ? value : 0;
+            SavePluginSettings();
+        }
+
+        private void SavePluginSettings()
+        {
+            try
+            {
+                string directory = Path.GetDirectoryName(SettingsFilePath);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+                File.WriteAllLines(SettingsFilePath, new[]
+                {
+                    "ShowTeamNamesInLeaderboard=" + _showTeamNamesInsteadOfDriverNames,
+                    "AdditionalTeamNamesInRelative=" + _additionalTeamNamesInRelative,
+                    "TyreCompoundSymbol=" + _tyreCompoundSymbolMode
+                });
+            }
+            catch
+            {
+                // Keep the option active for this session when settings cannot be saved.
+            }
         }
 
         private static List<string> BuildPropertyNames()
@@ -610,6 +937,9 @@ namespace MMOPlugin
                 "MMO_VehicleCount",
                 "MMO_ApiConnectionStatus",
                 "MMO_ApiLastError",
+                "MMO_SettingsShowTeamNamesInLeaderboard",
+                "MMO_SettingsAdditionalTeamNamesInRelative",
+                "MMO_SettingsTyreCompoundSymbol",
                 "MMO_InvalidLap",
                 "MMO_PlayerInc",
                 "MMO_maxIncidents",
@@ -620,6 +950,25 @@ namespace MMOPlugin
                 "MMO_RelativeBehind2",
                 "MMO_RelativeBehind3"
             };
+
+            string[] playerSuffixes =
+            {
+                "Overall", "Class", "CarNumber", "CarClass",
+                "TyreCompFL", "TyreCompFR", "TyreCompRL", "TyreCompRR",
+                "DriverName", "DriveNameRelative", "TeamName",
+                "BestLaptime", "LastLaptime", "GapToLeader",
+                "IntervalToNext", "PitStatus", "VirtualEnergy",
+                "Penalties", "Incidents", "InvalidLap", "FinishStatus"
+            };
+
+            foreach (string suffix in playerSuffixes)
+                names.Add("MMO_Player" + suffix);
+
+            for (int i = 1; i <= 3; i++)
+            {
+                names.Add("MMO_PlayerRelativeAhead" + i);
+                names.Add("MMO_PlayerRelativeBehind" + i);
+            }
 
             string[] positionSuffixes =
             {
@@ -632,6 +981,7 @@ namespace MMOPlugin
                 "TyreCompRL",
                 "TyreCompRR",
                 "DriverName",
+                "DriveNameRelative",
                 "TeamName",
                 "BestLaptime",
                 "LastLaptime",
@@ -1328,6 +1678,48 @@ namespace MMOPlugin
             );
         }
 
+        private static string FormatRelativeDriverName(
+            string driverName,
+            string teamName)
+        {
+            string normalizedDriverName = (driverName ?? "").Trim();
+            if (string.IsNullOrEmpty(normalizedDriverName))
+                return "";
+
+            string[] nameParts = normalizedDriverName.Split(
+                new[] { ' ', '\t' },
+                StringSplitOptions.RemoveEmptyEntries
+            );
+
+            string formattedDriverName = nameParts.Length > 1
+                ? nameParts[0].Substring(0, 1).ToUpperInvariant() + ". " +
+                  string.Join(" ", nameParts, 1, nameParts.Length - 1).ToUpperInvariant()
+                : normalizedDriverName.ToUpperInvariant();
+
+            string normalizedTeamName = (teamName ?? "").Trim();
+            return string.IsNullOrEmpty(normalizedTeamName)
+                ? formattedDriverName
+                : formattedDriverName + " (" + normalizedTeamName.ToUpperInvariant() + ")";
+        }
+
+        private static string FormatDriverName(string driverName)
+        {
+            string normalizedDriverName = (driverName ?? "").Trim();
+            if (string.IsNullOrEmpty(normalizedDriverName))
+                return "";
+
+            string[] nameParts = normalizedDriverName.Split(
+                new[] { ' ', '\t' },
+                StringSplitOptions.RemoveEmptyEntries
+            );
+
+            if (nameParts.Length < 2)
+                return normalizedDriverName;
+
+            return nameParts[0].Substring(0, 1).ToUpperInvariant() + ". " +
+                   string.Join(" ", nameParts, 1, nameParts.Length - 1);
+        }
+
         private static string DecodeString(
             byte[] bytes)
         {
@@ -1372,6 +1764,12 @@ namespace MMOPlugin
         private readonly TextBlock _updateStatus;
         private readonly Button _checkUpdateButton;
         private readonly Button _installUpdateButton;
+        private readonly CheckBox _leaderboardTeamNamesOption;
+        private readonly CheckBox _additionalRelativeTeamNamesOption;
+        private readonly ComboBox _tyreCompoundSymbolOption;
+        private readonly Action<bool> _setLeaderboardTeamNamesOption;
+        private readonly Action<bool> _setAdditionalRelativeTeamNamesOption;
+        private readonly Action<int> _setTyreCompoundSymbolMode;
         private GitHubRelease _latestRelease;
         private bool _checkingUpdate;
         private bool _installingUpdate;
@@ -1379,10 +1777,19 @@ namespace MMOPlugin
         public MMOPluginSettingsControl(
             PluginManager pluginManager,
             string version,
-            List<string> propertyNames)
+            List<string> propertyNames,
+            bool showTeamNamesInsteadOfDriverNames,
+            Action<bool> setLeaderboardTeamNamesOption,
+            bool additionalTeamNamesInRelative,
+            Action<bool> setAdditionalRelativeTeamNamesOption,
+            int tyreCompoundSymbolMode,
+            Action<int> setTyreCompoundSymbolMode)
         {
             _pluginManager = pluginManager;
             _propertyNames = propertyNames ?? new List<string>();
+            _setLeaderboardTeamNamesOption = setLeaderboardTeamNamesOption;
+            _setAdditionalRelativeTeamNamesOption = setAdditionalRelativeTeamNamesOption;
+            _setTyreCompoundSymbolMode = setTyreCompoundSymbolMode;
             Background = Brushes.Transparent;
             _searchBox = new TextBox
             {
@@ -1416,7 +1823,7 @@ namespace MMOPlugin
             VirtualizingPanel.SetIsVirtualizing(_propertyList, true);
             _resultCount = new TextBlock
             {
-                Margin = new Thickness(0, 0, 0, 7),
+                Margin = new Thickness(0),
                 Opacity = 0.7,
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize = 11
@@ -1445,6 +1852,34 @@ namespace MMOPlugin
                 Visibility = Visibility.Collapsed,
                 IsEnabled = false
             };
+            _leaderboardTeamNamesOption = new CheckBox
+            {
+                Content = "Show Team Names in Leaderboard",
+                IsChecked = showTeamNamesInsteadOfDriverNames,
+                FontSize = 13,
+                Margin = new Thickness(0, 0, 0, 6),
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            _additionalRelativeTeamNamesOption = new CheckBox
+            {
+                Content = "Additional Team Names in Relative",
+                IsChecked = additionalTeamNamesInRelative,
+                FontSize = 13,
+                Margin = new Thickness(0, 12, 0, 6),
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            _tyreCompoundSymbolOption = new ComboBox
+            {
+                Width = 260,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            _tyreCompoundSymbolOption.Items.Add("Display for all cars");
+            _tyreCompoundSymbolOption.Items.Add("Only own class");
+            _tyreCompoundSymbolOption.Items.Add("Own class, only when different");
+            _tyreCompoundSymbolOption.SelectedIndex =
+                tyreCompoundSymbolMode >= 0 && tyreCompoundSymbolMode <= 2
+                    ? tyreCompoundSymbolMode
+                    : 0;
 
             Grid root = new Grid
             {
@@ -1461,16 +1896,54 @@ namespace MMOPlugin
                 BorderBrush = new SolidColorBrush(Color.FromRgb(70, 75, 83)),
                 BorderThickness = new Thickness(0, 0, 0, 1)
             };
+
+            System.Windows.Documents.Hyperlink downloadLink =
+                new System.Windows.Documents.Hyperlink(
+                    new System.Windows.Documents.Run("Overlay")
+                )
+                {
+                    NavigateUri = new Uri(
+                        "https://www.overtake.gg/downloads/lmu-simhub-mmo-modern-multiclass-overlay-standings-relative-tires.74112/"
+                    )
+                };
+            downloadLink.RequestNavigate += DownloadLink_RequestNavigate;
+
+            System.Windows.Documents.Hyperlink releasesLink =
+                new System.Windows.Documents.Hyperlink(
+                    new System.Windows.Documents.Run("GitHub")
+                )
+                {
+                    NavigateUri = new Uri("https://github.com/St54Kevin/MMOPlugin/releases")
+                };
+            releasesLink.RequestNavigate += DownloadLink_RequestNavigate;
+
             DockPanel headerLayout = new DockPanel { LastChildFill = true };
             TextBlock currentVersion = new TextBlock
             {
                 Text = "v" + (version ?? ""),
                 Opacity = 0.72,
                 FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(12, 0, 0, 0)
+            };
+            TextBlock headerLinks = new TextBlock
+            {
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 12, 0)
+            };
+            headerLinks.Inlines.Add(downloadLink);
+            headerLinks.Inlines.Add(new System.Windows.Documents.Run("  ·  "));
+            headerLinks.Inlines.Add(releasesLink);
+            StackPanel headerActions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            DockPanel.SetDock(currentVersion, Dock.Right);
-            headerLayout.Children.Add(currentVersion);
+            headerActions.Children.Add(headerLinks);
+            headerActions.Children.Add(currentVersion);
+            DockPanel.SetDock(headerActions, Dock.Right);
+            headerLayout.Children.Add(headerActions);
             StackPanel titleGroup = new StackPanel { Orientation = Orientation.Horizontal };
             Image pluginLogo = new Image
             {
@@ -1498,7 +1971,7 @@ namespace MMOPlugin
             });
             titleGroup.Children.Add(new TextBlock
             {
-                Text = "Kevin_Karas",
+                Text = "by Kevin_Karas",
                 Opacity = 0.65,
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center
@@ -1528,37 +2001,6 @@ namespace MMOPlugin
             Grid.SetRow(updateCard, 1);
             root.Children.Add(updateCard);
 
-            System.Windows.Documents.Hyperlink downloadLink =
-                new System.Windows.Documents.Hyperlink(
-                    new System.Windows.Documents.Run(
-                        "Download MMO Plugin on OverTake.gg"
-                    )
-                )
-                {
-                    NavigateUri = new Uri(
-                        "https://www.overtake.gg/downloads/lmu-simhub-mmo-modern-multiclass-overlay-standings-relative-tires.74112/"
-                    )
-                };
-            downloadLink.RequestNavigate += DownloadLink_RequestNavigate;
-
-            System.Windows.Documents.Hyperlink releasesLink =
-                new System.Windows.Documents.Hyperlink(
-                    new System.Windows.Documents.Run("GitHub releases")
-                )
-                {
-                    NavigateUri = new Uri("https://github.com/St54Kevin/MMOPlugin/releases")
-                };
-            releasesLink.RequestNavigate += DownloadLink_RequestNavigate;
-
-            TextBlock downloadLine = new TextBlock
-            {
-                Margin = new Thickness(0, 0, 0, 8),
-                FontSize = 11,
-                Opacity = 0.82
-            };
-            downloadLine.Inlines.Add(downloadLink);
-            downloadLine.Inlines.Add(new System.Windows.Documents.Run("  ·  "));
-            downloadLine.Inlines.Add(releasesLink);
             StackPanel propertyHeading = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -1576,13 +2018,10 @@ namespace MMOPlugin
             Grid propertyArea = new Grid();
             propertyArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             propertyArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            propertyArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             propertyArea.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            Grid.SetRow(downloadLine, 0);
-            Grid.SetRow(propertyHeading, 1);
-            Grid.SetRow(_searchBox, 2);
-            Grid.SetRow(_propertyList, 3);
-            propertyArea.Children.Add(downloadLine);
+            Grid.SetRow(propertyHeading, 0);
+            Grid.SetRow(_searchBox, 1);
+            Grid.SetRow(_propertyList, 2);
             propertyArea.Children.Add(propertyHeading);
             propertyArea.Children.Add(_searchBox);
             propertyArea.Children.Add(_propertyList);
@@ -1593,6 +2032,11 @@ namespace MMOPlugin
             _searchBox.TextChanged += SearchBox_TextChanged;
             _checkUpdateButton.Click += CheckUpdateButton_Click;
             _installUpdateButton.Click += InstallUpdateButton_Click;
+            _leaderboardTeamNamesOption.Checked += TeamNameOption_Changed;
+            _leaderboardTeamNamesOption.Unchecked += TeamNameOption_Changed;
+            _additionalRelativeTeamNamesOption.Checked += TeamNameOption_Changed;
+            _additionalRelativeTeamNamesOption.Unchecked += TeamNameOption_Changed;
+            _tyreCompoundSymbolOption.SelectionChanged += TyreCompoundSymbolOption_SelectionChanged;
             Loaded += SettingsControl_Loaded;
             Unloaded += SettingsControl_Unloaded;
 
@@ -1604,8 +2048,102 @@ namespace MMOPlugin
             };
             _refreshTimer.Tick += RefreshTimer_Tick;
 
-            Content = root;
+            StackPanel leaderboardOptions = new StackPanel();
+            leaderboardOptions.Children.Add(_leaderboardTeamNamesOption);
+            leaderboardOptions.Children.Add(new TextBlock
+            {
+                Text = "Replaces the DriverName properties with the corresponding TeamName.",
+                Opacity = 0.7,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 520,
+                Margin = new Thickness(22, 0, 0, 0)
+            });
+
+            StackPanel relativeOptions = new StackPanel();
+            relativeOptions.Children.Add(_additionalRelativeTeamNamesOption);
+            relativeOptions.Children.Add(new TextBlock
+            {
+                Text = "Adds the team name to DriveNameRelative, formatted as initial, surname, and team.",
+                Opacity = 0.7,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 520,
+                Margin = new Thickness(22, 0, 0, 0)
+            });
+
+            StackPanel generalOptions = new StackPanel();
+            generalOptions.Children.Add(new TextBlock
+            {
+                Text = "Tyre Compound Symbol:",
+                FontSize = 13,
+                Margin = new Thickness(0, 0, 0, 6)
+            });
+            generalOptions.Children.Add(_tyreCompoundSymbolOption);
+
+            StackPanel settingsPage = new StackPanel
+            {
+                Margin = new Thickness(16),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            settingsPage.Children.Add(new GroupBox
+            {
+                Header = "Leaderboard",
+                Content = leaderboardOptions,
+                Margin = new Thickness(0, 0, 0, 10),
+                Padding = new Thickness(10)
+            });
+            settingsPage.Children.Add(new GroupBox
+            {
+                Header = "Relative",
+                Content = relativeOptions,
+                Margin = new Thickness(0, 0, 0, 10),
+                Padding = new Thickness(10)
+            });
+            settingsPage.Children.Add(new GroupBox
+            {
+                Header = "General",
+                Content = generalOptions,
+                Padding = new Thickness(10)
+            });
+
+            TabControl tabs = new TabControl();
+            tabs.Items.Add(new TabItem
+            {
+                Header = "Properties",
+                Content = root
+            });
+            tabs.Items.Add(new TabItem
+            {
+                Header = "Settings",
+                Content = settingsPage
+            });
+
+            Content = tabs;
             ApplyPropertyFilter();
+        }
+
+        private void TeamNameOption_Changed(object sender, RoutedEventArgs e)
+        {
+            if (ReferenceEquals(sender, _leaderboardTeamNamesOption))
+            {
+                if (_setLeaderboardTeamNamesOption != null)
+                    _setLeaderboardTeamNamesOption(_leaderboardTeamNamesOption.IsChecked == true);
+            }
+            else if (ReferenceEquals(sender, _additionalRelativeTeamNamesOption))
+            {
+                if (_setAdditionalRelativeTeamNamesOption != null)
+                    _setAdditionalRelativeTeamNamesOption(_additionalRelativeTeamNamesOption.IsChecked == true);
+            }
+        }
+
+        private void TyreCompoundSymbolOption_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (_setTyreCompoundSymbolMode != null &&
+                _tyreCompoundSymbolOption.SelectedIndex >= 0)
+                _setTyreCompoundSymbolMode(_tyreCompoundSymbolOption.SelectedIndex);
         }
 
         private void SearchBox_TextChanged(
@@ -1749,7 +2287,7 @@ namespace MMOPlugin
                 Version.TryParse(MMOPlugin.PluginVersion, out installed);
                 if (installed == null || available > installed)
                 {
-                    _updateStatus.Foreground = SystemColors.ControlTextBrush;
+                    _updateStatus.Foreground = Brushes.OrangeRed;
                     _updateStatus.Text = "Update available · v" + available.ToString();
                     _installUpdateButton.Visibility = Visibility.Visible;
                     _installUpdateButton.IsEnabled = FindPluginAsset(release) != null;
