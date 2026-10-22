@@ -36,7 +36,7 @@ namespace MMOPlugin
     [PluginDescription("Plugin required for Kevins MMO Overlays. Enable left menu for Options!")]
     public class MMOPlugin : IPlugin, IDataPlugin, IWPFSettingsV2
     {
-        public const string PluginVersion = "0.2.2.13";
+        public const string PluginVersion = "0.2.2.14";
         private static readonly string SettingsFilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SimHub",
@@ -80,6 +80,7 @@ namespace MMOPlugin
         private volatile bool _showTeamNamesInsteadOfDriverNames;
         private volatile bool _additionalTeamNamesInRelative;
         private volatile int _tyreCompoundSymbolMode;
+        private volatile int _lastLaptimeDisplayDurationMs = 10000;
         private volatile bool _showLastPitLapAndTimeInLeaderboard;
         private volatile bool _showLastPitLapAndTimeInRelative;
 
@@ -107,6 +108,7 @@ namespace MMOPlugin
             public bool HasLapStart;
             public double LapStartET;
             public double LastLapTime;
+            public DateTime PopupUntilUtc;
         }
 
         private sealed class PitStopTimingState
@@ -225,6 +227,11 @@ namespace MMOPlugin
             this.AttachDelegate(
                 name: "MMO_SettingsTyreCompoundSymbol",
                 valueProvider: () => _tyreCompoundSymbolMode
+            );
+
+            this.AttachDelegate(
+                name: "MMO_SettingsLastLaptimeDisplayDuration",
+                valueProvider: () => _lastLaptimeDisplayDurationMs
             );
 
             this.AttachDelegate(
@@ -486,6 +493,11 @@ namespace MMOPlugin
                         positionName +
                         "LastLaptime",
                     valueProvider: () => GetLastLapTime(capturedPosition)
+                );
+
+                this.AttachDelegate(
+                    name: "MMO_Position" + positionName + "LastLaptimePopup",
+                    valueProvider: () => GetLastLaptimePopup(capturedPosition)
                 );
 
                 this.AttachDelegate(
@@ -917,7 +929,9 @@ namespace MMOPlugin
                 _showLastPitLapAndTimeInLeaderboard,
                 SetShowLastPitLapAndTimeInLeaderboard,
                 _showLastPitLapAndTimeInRelative,
-                SetShowLastPitLapAndTimeInRelative
+                SetShowLastPitLapAndTimeInRelative,
+                _lastLaptimeDisplayDurationMs,
+                SetLastLaptimeDisplayDuration
             );
         }
 
@@ -926,6 +940,7 @@ namespace MMOPlugin
             _showTeamNamesInsteadOfDriverNames = false;
             _additionalTeamNamesInRelative = false;
             _tyreCompoundSymbolMode = 0;
+            _lastLaptimeDisplayDurationMs = 10000;
             _showLastPitLapAndTimeInLeaderboard = false;
             _showLastPitLapAndTimeInRelative = false;
             try
@@ -954,6 +969,15 @@ namespace MMOPlugin
                         int mode;
                         if (int.TryParse(settingValue, out mode) && mode >= 0 && mode <= 2)
                             _tyreCompoundSymbolMode = mode;
+                        continue;
+                    }
+
+                    if (string.Equals(key, "LastLaptimeDisplayDurationMs", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int durationMs;
+                        if (int.TryParse(settingValue, out durationMs) &&
+                            IsValidLastLaptimeDisplayDuration(durationMs))
+                            _lastLaptimeDisplayDurationMs = durationMs;
                         continue;
                     }
 
@@ -999,6 +1023,7 @@ namespace MMOPlugin
                 _showTeamNamesInsteadOfDriverNames = false;
                 _additionalTeamNamesInRelative = false;
                 _tyreCompoundSymbolMode = 0;
+                _lastLaptimeDisplayDurationMs = 10000;
                 _showLastPitLapAndTimeInLeaderboard = false;
                 _showLastPitLapAndTimeInRelative = false;
             }
@@ -1020,6 +1045,19 @@ namespace MMOPlugin
         {
             _tyreCompoundSymbolMode = value >= 0 && value <= 2 ? value : 0;
             SavePluginSettings();
+        }
+
+        private void SetLastLaptimeDisplayDuration(int value)
+        {
+            _lastLaptimeDisplayDurationMs =
+                IsValidLastLaptimeDisplayDuration(value) ? value : 10000;
+            SavePluginSettings();
+        }
+
+        private static bool IsValidLastLaptimeDisplayDuration(int value)
+        {
+            return value == 5000 || value == 10000 ||
+                value == 30000 || value == 45000;
         }
 
         private void SetShowLastPitLapAndTimeInLeaderboard(bool value)
@@ -1046,6 +1084,7 @@ namespace MMOPlugin
                     "ShowTeamNamesInLeaderboard=" + _showTeamNamesInsteadOfDriverNames,
                     "AdditionalTeamNamesInRelative=" + _additionalTeamNamesInRelative,
                     "TyreCompoundSymbol=" + _tyreCompoundSymbolMode,
+                    "LastLaptimeDisplayDurationMs=" + _lastLaptimeDisplayDurationMs,
                     "LeaderboardShowLastPitLapAndTimeDuringRace=" + _showLastPitLapAndTimeInLeaderboard,
                     "RelativeShowLastPitLapAndTimeDuringRace=" + _showLastPitLapAndTimeInRelative
                 });
@@ -1068,6 +1107,7 @@ namespace MMOPlugin
                 "MMO_SettingsShowTeamNamesInLeaderboard",
                 "MMO_SettingsAdditionalTeamNamesInRelative",
                 "MMO_SettingsTyreCompoundSymbol",
+                "MMO_SettingsLastLaptimeDisplayDuration",
                 "MMO_SettingsLeaderboardShowLastPitLapAndTimeDuringRace",
                 "MMO_SettingsRelativeShowLastPitLapAndTimeDuringRace",
                 "MMO_InvalidLap",
@@ -1116,6 +1156,7 @@ namespace MMOPlugin
                 "TeamName",
                 "BestLaptime",
                 "LastLaptime",
+                "LastLaptimePopup",
                 "GapToLeader",
                 "IntervalToNext",
                 "PitStatus",
@@ -1730,15 +1771,15 @@ namespace MMOPlugin
             else
             {
                 // Find the leader's first predicted line crossing at or after
-                // the timer reaches zero, including any crossings before zero.
+                // the timer reaches zero. Keep this as elapsed time from now;
+                // subtracting timeRemaining here would leave only the small
+                // post-zero remainder and make RefuelVE think the race is over.
                 double crossingsAfterNext = Math.Ceiling(
                     Math.Max(0.0, timeRemaining - leaderTimeToNextLine) /
                     leaderPace - 1e-9
                 );
-                leaderFinishAfterNow = Math.Max(
-                    0.0,
-                    leaderTimeToNextLine + crossingsAfterNext * leaderPace - timeRemaining
-                );
+                leaderFinishAfterNow = leaderTimeToNextLine +
+                    crossingsAfterNext * leaderPace;
             }
 
             bool playerAlreadyFinished = HasFinishStatus(playerApi, "FINISHED") ||
@@ -2001,9 +2042,21 @@ namespace MMOPlugin
             return state;
         }
 
-        private static double GetPitTimeSeconds(double seconds)
+        private static string GetPitTimeSeconds(double seconds)
         {
-            return IsFinite(seconds) && seconds >= 0.0 ? seconds : 0.0;
+            if (!IsFinite(seconds) || seconds < 0.0)
+                seconds = 0.0;
+
+            int totalSeconds = (int)Math.Floor(seconds);
+            if (totalSeconds < 60)
+            {
+                return totalSeconds.ToString(CultureInfo.InvariantCulture) + "s";
+            }
+
+            int minutes = totalSeconds / 60;
+            int remainingSeconds = totalSeconds % 60;
+            return minutes.ToString(CultureInfo.InvariantCulture) + ":" +
+                remainingSeconds.ToString("00", CultureInfo.InvariantCulture);
         }
 
         private void UpdateLastLapTimes()
@@ -2062,6 +2115,23 @@ namespace MMOPlugin
                         completedLapTime <= 3600.0)
                     {
                         state.LastLapTime = completedLapTime;
+
+                        int position = positionIndex + 1;
+                        LMUApiVehicle apiVehicle =
+                            _standingsApi.GetVehicleByPosition(position);
+                        if (string.Equals(
+                                GetPitStatus(position, apiVehicle),
+                                "onTrack",
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            state.PopupUntilUtc = DateTime.UtcNow.AddMilliseconds(
+                                _lastLaptimeDisplayDurationMs
+                            );
+                        }
+                        else
+                        {
+                            state.PopupUntilUtc = DateTime.MinValue;
+                        }
                     }
 
                     state.LapStartET = currentLapStartET;
@@ -2086,6 +2156,26 @@ namespace MMOPlugin
         {
             int vehicleId = GetVehicleIdAtPosition(position);
             return GetCachedLastLapTime(vehicleId);
+        }
+
+        private int GetLastLaptimePopup(int position)
+        {
+            int vehicleId = GetVehicleIdAtPosition(position);
+            LastLapTimingState state;
+            if (vehicleId < 0 ||
+                !_lastLapTimingByVehicleId.TryGetValue(vehicleId, out state) ||
+                !IsValidLapTime(state.LastLapTime) ||
+                DateTime.UtcNow >= state.PopupUntilUtc)
+            {
+                return 0;
+            }
+
+            LMUApiVehicle apiVehicle = _standingsApi.GetVehicleByPosition(position);
+            return string.Equals(
+                GetPitStatus(position, apiVehicle),
+                "onTrack",
+                StringComparison.OrdinalIgnoreCase
+            ) ? 1 : 0;
         }
 
         private double GetLastLapTimeForPlayer()
@@ -2732,9 +2822,11 @@ namespace MMOPlugin
         private readonly CheckBox _leaderboardPitDataOption;
         private readonly CheckBox _relativePitDataOption;
         private readonly ComboBox _tyreCompoundSymbolOption;
+        private readonly ComboBox _lastLaptimeDisplayDurationOption;
         private readonly Action<bool> _setLeaderboardTeamNamesOption;
         private readonly Action<bool> _setAdditionalRelativeTeamNamesOption;
         private readonly Action<int> _setTyreCompoundSymbolMode;
+        private readonly Action<int> _setLastLaptimeDisplayDuration;
         private readonly Action<bool> _setShowLastPitLapAndTimeInLeaderboard;
         private readonly Action<bool> _setShowLastPitLapAndTimeInRelative;
         private GitHubRelease _latestRelease;
@@ -2796,13 +2888,16 @@ namespace MMOPlugin
             bool showLastPitLapAndTimeInLeaderboard,
             Action<bool> setShowLastPitLapAndTimeInLeaderboard,
             bool showLastPitLapAndTimeInRelative,
-            Action<bool> setShowLastPitLapAndTimeInRelative)
+            Action<bool> setShowLastPitLapAndTimeInRelative,
+            int lastLaptimeDisplayDurationMs,
+            Action<int> setLastLaptimeDisplayDuration)
         {
             _pluginManager = pluginManager;
             _propertyNames = propertyNames ?? new List<string>();
             _setLeaderboardTeamNamesOption = setLeaderboardTeamNamesOption;
             _setAdditionalRelativeTeamNamesOption = setAdditionalRelativeTeamNamesOption;
             _setTyreCompoundSymbolMode = setTyreCompoundSymbolMode;
+            _setLastLaptimeDisplayDuration = setLastLaptimeDisplayDuration;
             _setShowLastPitLapAndTimeInLeaderboard = setShowLastPitLapAndTimeInLeaderboard;
             _setShowLastPitLapAndTimeInRelative = setShowLastPitLapAndTimeInRelative;
             Background = Brushes.Transparent;
@@ -2899,6 +2994,20 @@ namespace MMOPlugin
                 tyreCompoundSymbolMode >= 0 && tyreCompoundSymbolMode <= 2
                     ? tyreCompoundSymbolMode
                     : 0;
+            _lastLaptimeDisplayDurationOption = new ComboBox
+            {
+                Width = 260,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            _lastLaptimeDisplayDurationOption.Items.Add("5s");
+            _lastLaptimeDisplayDurationOption.Items.Add("10s");
+            _lastLaptimeDisplayDurationOption.Items.Add("30s");
+            _lastLaptimeDisplayDurationOption.Items.Add("45s");
+            int[] durationValues = { 5000, 10000, 30000, 45000 };
+            _lastLaptimeDisplayDurationOption.SelectedIndex =
+                Array.IndexOf(durationValues, lastLaptimeDisplayDurationMs);
+            if (_lastLaptimeDisplayDurationOption.SelectedIndex < 0)
+                _lastLaptimeDisplayDurationOption.SelectedIndex = 1;
             _leaderboardPitDataOption = new CheckBox
             {
                 Content = "Show last pit lap and time during race",
@@ -3082,6 +3191,7 @@ namespace MMOPlugin
             _relativePitDataOption.Checked += PitDataOption_Changed;
             _relativePitDataOption.Unchecked += PitDataOption_Changed;
             _tyreCompoundSymbolOption.SelectionChanged += TyreCompoundSymbolOption_SelectionChanged;
+            _lastLaptimeDisplayDurationOption.SelectionChanged += LastLaptimeDisplayDurationOption_SelectionChanged;
             Loaded += SettingsControl_Loaded;
             Unloaded += SettingsControl_Unloaded;
 
@@ -3127,6 +3237,22 @@ namespace MMOPlugin
                 Margin = new Thickness(0, 0, 0, 6)
             });
             generalOptions.Children.Add(_tyreCompoundSymbolOption);
+            generalOptions.Children.Add(new TextBlock
+            {
+                Text = "Last Laptime display duration",
+                FontSize = 13,
+                Margin = new Thickness(0, 16, 0, 6)
+            });
+            generalOptions.Children.Add(_lastLaptimeDisplayDurationOption);
+            generalOptions.Children.Add(new TextBlock
+            {
+                Text = "Affects duration of last laptime popup on leaderboard and relative",
+                Opacity = 0.7,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 520,
+                Margin = new Thickness(0, 4, 0, 0)
+            });
 
             StackPanel settingsPage = new StackPanel
             {
@@ -3467,6 +3593,20 @@ namespace MMOPlugin
             if (_setTyreCompoundSymbolMode != null &&
                 _tyreCompoundSymbolOption.SelectedIndex >= 0)
                 _setTyreCompoundSymbolMode(_tyreCompoundSymbolOption.SelectedIndex);
+        }
+
+        private void LastLaptimeDisplayDurationOption_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (_setLastLaptimeDisplayDuration == null ||
+                _lastLaptimeDisplayDurationOption.SelectedIndex < 0)
+                return;
+
+            int[] durationValues = { 5000, 10000, 30000, 45000 };
+            _setLastLaptimeDisplayDuration(
+                durationValues[_lastLaptimeDisplayDurationOption.SelectedIndex]
+            );
         }
 
         private void PitDataOption_Changed(object sender, RoutedEventArgs e)
