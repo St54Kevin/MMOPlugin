@@ -36,7 +36,7 @@ namespace MMOPlugin
     [PluginDescription("Plugin required for Kevins MMO Overlays. Enable left menu for Options!")]
     public class MMOPlugin : IPlugin, IDataPlugin, IWPFSettingsV2
     {
-        public const string PluginVersion = "0.2.2.14";
+        public const string PluginVersion = "0.3.0.0";
         private static readonly string SettingsFilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SimHub",
@@ -2846,6 +2846,7 @@ namespace MMOPlugin
         {
             public string FileName;
             public string DisplayName;
+            public string InstalledDisplayName;
             public string OverlayKey;
             public string PackageVersion;
             public string InstalledVersion;
@@ -2871,6 +2872,7 @@ namespace MMOPlugin
         {
             public string Path;
             public string ExpandedDirectory;
+            public string DisplayName;
             public string Version;
             public string Hash;
         }
@@ -3515,7 +3517,9 @@ namespace MMOPlugin
 
                 TextBlock name = new TextBlock
                 {
-                    Text = item.DisplayName,
+                    Text = item.IsInstalled
+                        ? item.InstalledDisplayName
+                        : GetOverlayNameWithoutVersion(item.DisplayName) + " · Not installed",
                     VerticalAlignment = VerticalAlignment.Center,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     ToolTip = item.FileName
@@ -3774,48 +3778,19 @@ namespace MMOPlugin
 
                 string cacheRoot = GetOverlayCacheDirectory();
                 Directory.CreateDirectory(cacheRoot);
-                string cachedArchive = FindLatestCachedOverlayArchive(cacheRoot);
-                Version cachedVersion = cachedArchive != null
-                    ? Version.Parse(ExtractOverlayVersion(Path.GetFileName(cachedArchive)))
-                    : null;
-                bool githubHasNewVersion = cachedVersion == null || githubVersion > cachedVersion;
-                bool githubHasSameVersion = cachedVersion != null && githubVersion == cachedVersion;
-                GitHubReleaseAsset selectedAsset = asset;
                 string archivePath = Path.Combine(cacheRoot, Path.GetFileName(asset.Name));
-
-                if (githubHasNewVersion)
-                {
-                    _overlayStatus.Text = "New overlay package v" + githubVersion +
-                        " found" + (cachedVersion != null ? " (downloaded v" + cachedVersion + ")" : "") +
-                        ". Downloading…";
-                }
-                else if (!githubHasSameVersion && cachedArchive != null)
-                {
-                    selectedAsset = new GitHubReleaseAsset
-                    {
-                        Name = Path.GetFileName(cachedArchive),
-                        DownloadUrl = null
-                    };
-                    archivePath = cachedArchive;
-                    _overlayStatus.Text = "The downloaded overlay package v" + cachedVersion +
-                        " is newer than the latest GitHub package v" + githubVersion + ". Using the downloaded package…";
-                }
-                else
-                {
-                    _overlayStatus.Text = "Overlay package v" + githubVersion +
-                        " is already downloaded. Checking installed overlays…";
-                }
+                _overlayStatus.Text = "Downloading the latest overlay package v" +
+                    githubVersion + " from GitHub…";
 
                 List<OverlayPackageItem> items = await Task.Run(
-                    () => DownloadAndInspectOverlayPackage(selectedAsset, archivePath)
+                    () => DownloadAndInspectOverlayPackage(asset, archivePath)
                 );
                 _overlayItems.Clear();
                 _overlayItems.AddRange(items);
-                _overlayPackageVersion = ExtractOverlayVersion(selectedAsset.Name) ?? "latest";
+                _overlayPackageVersion = ExtractOverlayVersion(asset.Name) ?? "latest";
                 RefreshOverlayList();
-                _overlayStatus.Text = (githubHasNewVersion
-                        ? "Downloaded new overlay package v"
-                        : "Overlay package v") + _overlayPackageVersion + ". " +
+                _overlayStatus.Text = "Downloaded latest overlay package v" +
+                    _overlayPackageVersion + ". " +
                     items.Count.ToString(CultureInfo.InvariantCulture) +
                     " overlay(s) compared with installed versions.";
             }
@@ -3838,15 +3813,45 @@ namespace MMOPlugin
             if (release == null || release.Assets == null)
                 return null;
 
+            GitHubReleaseAsset latestAsset = null;
+            Version latestVersion = null;
             foreach (GitHubReleaseAsset asset in release.Assets)
             {
                 string name = asset.Name ?? "";
-                if (name.StartsWith("MMOverlays_", StringComparison.OrdinalIgnoreCase) &&
-                    name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                    return asset;
+                Version candidateVersion;
+                if (!name.StartsWith("MMOverlays_", StringComparison.OrdinalIgnoreCase) ||
+                    !name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+                    !Version.TryParse(ExtractOverlayVersion(name), out candidateVersion))
+                    continue;
+
+                if (latestAsset == null || candidateVersion > latestVersion ||
+                    (candidateVersion == latestVersion &&
+                     IsAssetUpdatedMoreRecently(asset, latestAsset)))
+                {
+                    latestAsset = asset;
+                    latestVersion = candidateVersion;
+                }
             }
 
-            return null;
+            return latestAsset;
+        }
+
+        private static bool IsAssetUpdatedMoreRecently(
+            GitHubReleaseAsset candidate,
+            GitHubReleaseAsset current)
+        {
+            DateTime candidateUpdated;
+            DateTime currentUpdated;
+            return DateTime.TryParse(
+                    candidate != null ? candidate.UpdatedAt : null,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal,
+                    out candidateUpdated) &&
+                (!DateTime.TryParse(
+                    current != null ? current.UpdatedAt : null,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal,
+                    out currentUpdated) || candidateUpdated > currentUpdated);
         }
 
         private static string GetOverlayCacheDirectory()
@@ -3858,27 +3863,6 @@ namespace MMOPlugin
             );
         }
 
-        private static string FindLatestCachedOverlayArchive(string cacheDirectory)
-        {
-            if (!Directory.Exists(cacheDirectory))
-                return null;
-
-            string latestPath = null;
-            Version latestVersion = null;
-            foreach (string path in Directory.GetFiles(cacheDirectory, "MMOverlays_*.zip", SearchOption.TopDirectoryOnly))
-            {
-                Version candidate;
-                if (!Version.TryParse(ExtractOverlayVersion(Path.GetFileName(path)), out candidate))
-                    continue;
-                if (latestVersion == null || candidate > latestVersion)
-                {
-                    latestVersion = candidate;
-                    latestPath = path;
-                }
-            }
-            return latestPath;
-        }
-
         private static List<OverlayPackageItem> DownloadAndInspectOverlayPackage(
             GitHubReleaseAsset asset,
             string archivePath)
@@ -3888,10 +3872,10 @@ namespace MMOPlugin
 
             string cacheRoot = Path.GetDirectoryName(archivePath);
             Directory.CreateDirectory(cacheRoot);
-            if (!File.Exists(archivePath))
+            // Always fetch the selected release asset again. GitHub release assets can
+            // be replaced while retaining the same filename and package version.
+            if (!string.IsNullOrEmpty(asset.DownloadUrl))
             {
-                if (string.IsNullOrEmpty(asset.DownloadUrl))
-                    throw new InvalidDataException("The cached overlay package could not be found.");
                 string downloadPath = archivePath + ".download";
                 try
                 {
@@ -3901,6 +3885,31 @@ namespace MMOPlugin
                             "MMOPlugin-Updater/" + MMOPlugin.PluginVersion;
                         client.DownloadFile(asset.DownloadUrl, downloadPath);
                     }
+
+                    if (asset.Size > 0 && new FileInfo(downloadPath).Length != asset.Size)
+                        throw new InvalidDataException(
+                            "The downloaded overlay ZIP size does not match the GitHub release asset."
+                        );
+
+                    using (ZipArchive downloadedPackage = ZipFile.OpenRead(downloadPath))
+                    {
+                        bool containsDashboards = false;
+                        foreach (ZipArchiveEntry entry in downloadedPackage.Entries)
+                        {
+                            if (entry.FullName.EndsWith(
+                                    ".simhubdash",
+                                    StringComparison.OrdinalIgnoreCase))
+                            {
+                                containsDashboards = true;
+                                break;
+                            }
+                        }
+                        if (!containsDashboards)
+                            throw new InvalidDataException(
+                                "The downloaded release ZIP contains no .simhubdash files."
+                            );
+                    }
+
                     if (File.Exists(archivePath))
                         File.Delete(archivePath);
                     File.Move(downloadPath, archivePath);
@@ -3910,6 +3919,10 @@ namespace MMOPlugin
                     if (File.Exists(downloadPath))
                         File.Delete(downloadPath);
                 }
+            }
+            else if (!File.Exists(archivePath))
+            {
+                throw new InvalidDataException("The cached overlay package could not be found.");
             }
 
             string workRoot = Path.Combine(
@@ -3972,15 +3985,17 @@ namespace MMOPlugin
                     );
                     string shownName = packageIdentity.DisplayName;
                     string statusText = !installed
-                        ? "Not installed · v" + (packageIdentity.Version ?? "unknown")
+                        ? "Available · v" + (packageIdentity.Version ?? "unknown")
                         : different
-                            ? "Update available · " + (installedOverlay.Version ?? "unknown") + " → " +
-                                (packageIdentity.Version ?? "unknown")
-                            : "Up to date · v" + (installedOverlay.Version ?? packageIdentity.Version ?? "unknown");
+                            ? "Update available · v" + (packageIdentity.Version ?? "unknown")
+                            : "Up to date · v" + (packageIdentity.Version ?? "unknown");
                     items.Add(new OverlayPackageItem
                     {
                         FileName = fileName,
                         DisplayName = shownName,
+                        InstalledDisplayName = installedOverlay != null
+                            ? installedOverlay.DisplayName
+                            : null,
                         OverlayKey = packageIdentity.Key,
                         PackageVersion = packageIdentity.Version,
                         InstalledVersion = installedOverlay != null ? installedOverlay.Version : null,
@@ -4026,6 +4041,38 @@ namespace MMOPlugin
             if (!Directory.Exists(templateDirectory))
                 return null;
 
+            // Expanded metadata is the source SimHub uses for the title and version
+            // shown in its overlay list. Prefer it over archived dashboard copies.
+            InstalledOverlay bestInstalled = null;
+            foreach (string metadataPath in Directory.GetFiles(
+                templateDirectory,
+                "*.djson.metadata",
+                SearchOption.AllDirectories))
+            {
+                OverlayIdentity installedIdentity = ReadOverlayMetadata(metadataPath);
+                bool sameName = packageIdentity != null &&
+                    !string.IsNullOrEmpty(packageIdentity.Key) &&
+                    string.Equals(packageIdentity.Key, installedIdentity.Key, StringComparison.OrdinalIgnoreCase);
+                if (sameName)
+                {
+                    InstalledOverlay candidate = new InstalledOverlay
+                    {
+                        DisplayName = installedIdentity.DisplayName,
+                        ExpandedDirectory = Path.GetDirectoryName(metadataPath),
+                        Version = installedIdentity.Version,
+                        Hash = ComputeFileHash(metadataPath)
+                    };
+                    if (bestInstalled == null || IsHigherOverlayVersion(
+                            candidate.Version,
+                            bestInstalled.Version))
+                        bestInstalled = candidate;
+                }
+            }
+
+            if (bestInstalled != null)
+                return bestInstalled;
+
+            // Older SimHub installs may have only the .simhubdash archive available.
             foreach (string path in Directory.GetFiles(
                 templateDirectory,
                 "*.simhubdash",
@@ -4041,36 +4088,42 @@ namespace MMOPlugin
                     StringComparison.OrdinalIgnoreCase);
                 if (sameName || sameFile)
                 {
-                    return new InstalledOverlay
+                    InstalledOverlay candidate = new InstalledOverlay
                     {
                         Path = path,
+                        DisplayName = installedIdentity.DisplayName,
                         Version = installedIdentity.Version,
                         Hash = ComputeFileHash(path)
                     };
+                    if (bestInstalled == null || IsHigherOverlayVersion(
+                            candidate.Version,
+                            bestInstalled.Version))
+                        bestInstalled = candidate;
                 }
             }
 
-            foreach (string metadataPath in Directory.GetFiles(
-                templateDirectory,
-                "*.djson.metadata",
-                SearchOption.AllDirectories))
-            {
-                OverlayIdentity installedIdentity = ReadOverlayMetadata(metadataPath);
-                bool sameName = packageIdentity != null &&
-                    !string.IsNullOrEmpty(packageIdentity.Key) &&
-                    string.Equals(packageIdentity.Key, installedIdentity.Key, StringComparison.OrdinalIgnoreCase);
-                if (sameName)
-                {
-                    return new InstalledOverlay
-                    {
-                        ExpandedDirectory = Path.GetDirectoryName(metadataPath),
-                        Version = installedIdentity.Version,
-                        Hash = ComputeFileHash(metadataPath)
-                    };
-                }
-            }
+            return bestInstalled;
+        }
 
-            return null;
+        private static bool IsHigherOverlayVersion(string candidateVersion, string currentVersion)
+        {
+            Version candidate;
+            Version current;
+            if (!Version.TryParse(candidateVersion, out candidate))
+                return false;
+            if (!Version.TryParse(currentVersion, out current))
+                return true;
+            return candidate > current;
+        }
+
+        private static string GetOverlayNameWithoutVersion(string displayName)
+        {
+            string name = Regex.Replace(
+                displayName ?? "Overlay",
+                "(?i)\\s+v?\\d+\\.\\d+(?:\\.\\d+){1,2}\\s*$",
+                ""
+            ).Trim();
+            return string.IsNullOrWhiteSpace(name) ? "Overlay" : name;
         }
 
         private static OverlayIdentity ReadOverlayMetadata(string metadataPath)
@@ -4160,12 +4213,14 @@ namespace MMOPlugin
                 {
                     string title = null;
                     string version = null;
+
+                    // SimHub's .djson.metadata contains the user-visible overlay title.
+                    // Prefer it over fields in .djson, which can contain stale/internal names.
                     foreach (ZipArchiveEntry entry in package.Entries)
                     {
-                        string name = entry.FullName ?? "";
-                        bool metadata = name.EndsWith(".metadata", StringComparison.OrdinalIgnoreCase);
-                        bool dashboardJson = name.EndsWith(".djson", StringComparison.OrdinalIgnoreCase);
-                        if (!metadata && !dashboardJson)
+                        if (!(entry.FullName ?? "").EndsWith(
+                                ".djson.metadata",
+                                StringComparison.OrdinalIgnoreCase))
                             continue;
 
                         string text;
@@ -4176,45 +4231,81 @@ namespace MMOPlugin
                         if (text.Length > 4 * 1024 * 1024)
                             continue;
 
-                        MatchCollection titleMatches = Regex.Matches(
+                        Match metadataTitle = Regex.Match(
                             text,
-                            "[\\\"'](?:Name|Title|DashboardName|TemplateName|DisplayName)[\\\"']\\s*:\\s*[\\\"']([^\\\"']{2,160})[\\\"']",
+                            "[\\\"']Title[\\\"']\\s*:\\s*[\\\"']([^\\\"']{2,160})[\\\"']",
                             RegexOptions.IgnoreCase
                         );
-                        foreach (Match match in titleMatches)
+                        if (metadataTitle.Success)
                         {
-                            string candidate = match.Groups[1].Value.Trim();
+                            string candidate = metadataTitle.Groups[1].Value.Trim();
                             if (candidate.IndexOf("MMO", StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
                                 title = candidate;
-                                break;
-                            }
                         }
 
                         if (string.IsNullOrEmpty(title))
                         {
-                            Match titleInText = Regex.Match(
+                            MatchCollection titleMatches = Regex.Matches(
                                 text,
-                                "MMO\\s*[-–]\\s*[^\\r\\n\\\"']{1,100}?v?\\d+\\.\\d+(?:\\.\\d+){1,2}",
+                                "[\\\"'](?:Name|Title|DashboardName|TemplateName|DisplayName)[\\\"']\\s*:\\s*[\\\"']([^\\\"']{2,160})[\\\"']",
                                 RegexOptions.IgnoreCase
                             );
-                            if (titleInText.Success)
-                                title = titleInText.Value.Trim();
+                            foreach (Match match in titleMatches)
+                            {
+                                string candidate = match.Groups[1].Value.Trim();
+                                if (candidate.IndexOf("MMO", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    title = candidate;
+                                    break;
+                                }
+                            }
                         }
 
-                        if (string.IsNullOrEmpty(version))
-                        {
-                            Match versionMatch = Regex.Match(
-                                text,
-                                "[\\\"'](?:OverlayVersion|DashboardVersion|Version)[\\\"']\\s*:\\s*[\\\"']v?(\\d+\\.\\d+(?:\\.\\d+){1,2})[\\\"']",
-                                RegexOptions.IgnoreCase
-                            );
-                            if (versionMatch.Success)
-                                version = versionMatch.Groups[1].Value;
-                        }
+                        Match versionMatch = Regex.Match(
+                            text,
+                            "[\\\"'](?:OverlayVersion|DashboardVersion|Version)[\\\"']\\s*:\\s*[\\\"']v?(\\d+\\.\\d+(?:\\.\\d+){1,2})[\\\"']",
+                            RegexOptions.IgnoreCase
+                        );
+                        if (versionMatch.Success)
+                            version = versionMatch.Groups[1].Value;
 
-                        if (!string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(version))
+                        if (!string.IsNullOrEmpty(title))
                             break;
+                    }
+
+                    // Fall back to dashboard JSON only when metadata does not expose a title.
+                    if (string.IsNullOrEmpty(title))
+                    {
+                        foreach (ZipArchiveEntry entry in package.Entries)
+                        {
+                            if (!(entry.FullName ?? "").EndsWith(".djson", StringComparison.OrdinalIgnoreCase))
+                                continue;
+
+                            string text;
+                            using (Stream stream = entry.Open())
+                            using (StreamReader reader = new StreamReader(stream, Encoding.UTF8, true))
+                                text = reader.ReadToEnd();
+                            if (text.Length > 4 * 1024 * 1024)
+                                continue;
+
+                            MatchCollection titleMatches = Regex.Matches(
+                                text,
+                                "[\\\"'](?:Name|Title|DashboardName|TemplateName|DisplayName)[\\\"']\\s*:\\s*[\\\"']([^\\\"']{2,160})[\\\"']",
+                                RegexOptions.IgnoreCase
+                            );
+                            foreach (Match match in titleMatches)
+                            {
+                                string candidate = match.Groups[1].Value.Trim();
+                                if (candidate.IndexOf("MMO", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    title = candidate;
+                                    break;
+                                }
+                            }
+
+                            if (!string.IsNullOrEmpty(title))
+                                break;
+                        }
                     }
 
                     if (string.IsNullOrEmpty(title) && package.Entries.Count > 0)
@@ -4758,6 +4849,10 @@ namespace MMOPlugin
         public string Name { get; set; }
         [DataMember(Name = "browser_download_url")]
         public string DownloadUrl { get; set; }
+        [DataMember(Name = "updated_at")]
+        public string UpdatedAt { get; set; }
+        [DataMember(Name = "size")]
+        public long Size { get; set; }
     }
 
     internal sealed class MMOPropertyDisplayItem : INotifyPropertyChanged
