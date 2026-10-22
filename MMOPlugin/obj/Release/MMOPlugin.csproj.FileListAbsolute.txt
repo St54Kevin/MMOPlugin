@@ -1,0 +1,8 @@
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\obj\Release\MMOPlugin.csproj.AssemblyReference.cache
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\obj\Release\MMOPlugin.g.resources
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\obj\Release\MMOPlugin.csproj.CoreCompileInputs.cache
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\obj\Release\MMOPlugin.csproj.Up2Date
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\obj\Release\MMOPlugin.dll
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\obj\Release\MMOPlugin.pdb
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin.dll
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin.pdb

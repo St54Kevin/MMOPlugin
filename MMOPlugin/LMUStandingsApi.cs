@@ -13,6 +13,8 @@ namespace MMOPlugin
     {
         private const string StandingsUrl =
             "http://127.0.0.1:6397/rest/watch/standings";
+        private const string RepairAndRefuelUrl =
+            "http://127.0.0.1:6397/rest/garage/UIScreen/RepairAndRefuel";
 
         private const int MaxVehicles = 62;
 
@@ -29,6 +31,20 @@ namespace MMOPlugin
         private string _lastError = "";
 
         private int _session;
+        private DateTime _lastFuelInfoRequestUtc = DateTime.MinValue;
+        private double _currentFuelLiters;
+        private double _fuelCapacityLiters;
+        private bool _hasFuelInfo;
+
+        public bool TryGetFuelInfo(out double currentFuelLiters, out double capacityLiters)
+        {
+            lock (_lock)
+            {
+                currentFuelLiters = _currentFuelLiters;
+                capacityLiters = _fuelCapacityLiters;
+                return _hasFuelInfo;
+            }
+        }
 
         public bool IsConnected
         {
@@ -119,6 +135,12 @@ namespace MMOPlugin
 
                     UpdateVehicles(vehicles);
                 }
+
+                if ((DateTime.UtcNow - _lastFuelInfoRequestUtc).TotalSeconds >= 1.0)
+                {
+                    _lastFuelInfoRequestUtc = DateTime.UtcNow;
+                    UpdateFuelInfo();
+                }
             }
             catch (Exception ex)
             {
@@ -131,6 +153,50 @@ namespace MMOPlugin
                         ": " +
                         ex.Message;
                 }
+            }
+        }
+
+        private void UpdateFuelInfo()
+        {
+            try
+            {
+                string json;
+                using (WebClient client = new WebClient())
+                {
+                    client.Encoding = Encoding.UTF8;
+                    json = client.DownloadString(RepairAndRefuelUrl);
+                }
+
+                DataContractJsonSerializer serializer =
+                    new DataContractJsonSerializer(typeof(LMURepairAndRefuelResponse));
+                LMURepairAndRefuelResponse response;
+                using (MemoryStream stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+                {
+                    response = (LMURepairAndRefuelResponse)serializer.ReadObject(stream);
+                }
+
+                LMURepairFuelInfo fuelInfo = response != null ? response.FuelInfo : null;
+                bool valid = fuelInfo != null &&
+                    !double.IsNaN(fuelInfo.CurrentFuel) &&
+                    !double.IsInfinity(fuelInfo.CurrentFuel) &&
+                    !double.IsNaN(fuelInfo.MaxFuel) &&
+                    !double.IsInfinity(fuelInfo.MaxFuel) &&
+                    fuelInfo.CurrentFuel >= 0.0 && fuelInfo.MaxFuel > 0.0;
+
+                lock (_lock)
+                {
+                    _hasFuelInfo = valid;
+                    if (valid)
+                    {
+                        _currentFuelLiters = fuelInfo.CurrentFuel;
+                        _fuelCapacityLiters = fuelInfo.MaxFuel;
+                    }
+                }
+            }
+            catch
+            {
+                lock (_lock)
+                    _hasFuelInfo = false;
             }
         }
 
@@ -394,6 +460,23 @@ namespace MMOPlugin
                 _timer = null;
             }
         }
+    }
+
+    [DataContract]
+    public sealed class LMURepairAndRefuelResponse
+    {
+        [DataMember(Name = "fuelInfo")]
+        public LMURepairFuelInfo FuelInfo { get; set; }
+    }
+
+    [DataContract]
+    public sealed class LMURepairFuelInfo
+    {
+        [DataMember(Name = "currentFuel")]
+        public double CurrentFuel { get; set; }
+
+        [DataMember(Name = "maxFuel")]
+        public double MaxFuel { get; set; }
     }
 
     [DataContract]
