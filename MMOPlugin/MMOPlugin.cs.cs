@@ -1,4 +1,11 @@
-﻿using System;
+// Copyright (C) 2024-2026 Kevin_Karas
+// Portions of the calculations in this plugin are adapted from TinyPedal.
+// TinyPedal is Copyright (C) 2022-2026 TinyPedal developers and is licensed
+// under GNU GPL version 3 or (at your option) any later version.
+// This project is distributed under the same license; see the repository LICENSE.
+// Modified for the LMU SimHub plugin by Kevin_Karas (2026).
+
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;

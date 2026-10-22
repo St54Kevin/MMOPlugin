@@ -39,12 +39,11 @@ The suite also includes leaderboard/relative variants and tyre displays describe
 
 ## Install
 
-1. Download the latest plugin DLL and `MMOverlays_*.zip` package from [GitHub Releases](https://github.com/St54Kevin/MMOPlugin/releases).
-2. Install the plugin DLL in SimHub using the release instructions, then restart SimHub if requested.
-3. Install the `.simhubdash` overlays from the ZIP through SimHub Dash Studio.
-4. Open the **MMO Plugin** page in SimHub to inspect plugin status, overlay package updates and settings.
+1. Download the latest `MMOPlugin.dll` from [GitHub Releases](https://github.com/St54Kevin/MMOPlugin/releases) and install it in SimHub.
+2. Restart SimHub if requested, then open the **MMO Plugin** page.
+3. Open the **Overlays** tab and use its check/install controls to inspect and install the available overlays directly through the plugin.
 
-The plugin's **Overlays** page can check the latest release, compare overlay titles and versions from each dashboard's metadata with the installed SimHub overlays, and install or update selected overlays.
+You only need to download and install the plugin DLL manually. The plugin retrieves the latest overlay package itself; downloading or extracting the overlay ZIP separately is not required.
 
 ## Build from source
 
@@ -56,6 +55,14 @@ Open `MMOPlugin.slnx` and build the solution. If the project reports missing Sim
 ## Data availability
 
 The plugin can only expose data that LMU provides through its shared memory or API. Some information, such as custom team names or certain car-specific values, may be unavailable or incomplete depending on the session and LMU data.
+
+## License and attribution
+
+This project is distributed under the **GNU General Public License v3.0 or later**. See [LICENSE](LICENSE) for the full license text.
+
+Portions of the plugin calculations are adapted from [TinyPedal](https://github.com/TinyPedal/TinyPedal), Copyright (C) 2022-2026 TinyPedal developers. TinyPedal is licensed under GPL-3.0-or-later. This plugin's related implementation has been modified for SimHub and Le Mans Ultimate.
+
+The plugin and overlay suite are maintained by Kevin_Karas. Third-party libraries and assets remain subject to their own licenses.
 
 ## Credits
 
