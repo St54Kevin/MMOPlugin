@@ -37,6 +37,16 @@ The overlay package contains the following displays. Names and versions can vary
 
 The suite also includes leaderboard/relative variants and tyre displays described on the [original OverTake page](https://www.overtake.gg/downloads/lmu-simhub-mmo-modern-multiclass-overlay-standings-relative-tires.74112/). Available items depend on the overlay package version.
 
+## Screenshots
+
+**Q session / qualifying:**
+
+![MMO overlays during a qualifying session](MMOPlugin/Screenshots/leaderboard-qualifying.png)
+
+**R session / race:**
+
+![MMO overlays during a race](MMOPlugin/Screenshots/leaderboard-race.png)
+
 ## Install
 
 1. Download the latest `MMOPlugin.dll` from [GitHub Releases](https://github.com/St54Kevin/MMOPlugin/releases) and install it in SimHub.
