@@ -199,4 +199,6 @@ C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\bin\Debug\K4os.Compre
 C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\bin\Debug\SharpCompress.dll
 C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\bin\Debug\ZstdSharp.dll
 C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\bin\Debug\System.Threading.Tasks.Extensions.dll
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\bin\verify\NAudio.Asio.dll
+C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\bin\verify\Microsoft.Win32.Registry.dll
 C:\Users\Kevin\Downloads\MMO\MMOPlugin\MMOPlugin\MMOPlugin\obj\Debug\MMOPlugin.g.resources

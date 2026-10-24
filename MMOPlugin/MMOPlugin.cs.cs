@@ -14,12 +14,14 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
+using System.Net.Sockets;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Threading;
 using GameReaderCommon;
 using SimHub.Plugins;
 using System.Windows;
@@ -36,7 +38,7 @@ namespace MMOPlugin
     [PluginDescription("Plugin required for Kevins MMO Overlays. Enable left menu for Options!")]
     public class MMOPlugin : IPlugin, IDataPlugin, IWPFSettingsV2
     {
-        public const string PluginVersion = "0.3.0.0";
+        public const string PluginVersion = "0.3.1.0";
         private static readonly string SettingsFilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SimHub",
@@ -83,6 +85,7 @@ namespace MMOPlugin
         private volatile int _lastLaptimeDisplayDurationMs = 10000;
         private volatile bool _showLastPitLapAndTimeInLeaderboard;
         private volatile bool _showLastPitLapAndTimeInRelative;
+        private readonly TeamSpeakClientQuery _teamSpeak = new TeamSpeakClientQuery();
 
         private readonly double[] _relativeAhead = new double[3];
         private readonly double[] _relativeBehind = new double[3];
@@ -174,6 +177,7 @@ namespace MMOPlugin
             LoadPluginSettings();
 
             _standingsApi.Start();
+            LoadTeamSpeakApiKey();
             ClearTrackLimitPoints();
 
             this.AttachDelegate(
@@ -243,6 +247,22 @@ namespace MMOPlugin
                 name: "MMO_SettingsRelativeShowLastPitLapAndTimeDuringRace",
                 valueProvider: () => _showLastPitLapAndTimeInRelative ? 1 : 0
             );
+
+            this.AttachDelegate("MMO_Teamspeak_Connected", () => _teamSpeak.Connected ? 1 : 0);
+            this.AttachDelegate("MMO_Teamspeak_Status", () => _teamSpeak.Status);
+            this.AttachDelegate("MMO_Teamspeak_ServerName", () => _teamSpeak.ServerName);
+            this.AttachDelegate("MMO_Teamspeak_ChannelName", () => _teamSpeak.ChannelName);
+            this.AttachDelegate("MMO_Teamspeak_PlayerName", () => _teamSpeak.PlayerName);
+            this.AttachDelegate("MMO_Teamspeak_PlayerStatus", () => _teamSpeak.PlayerStatus);
+            this.AttachDelegate("MMO_Teamspeak_PlayerTalking", () => _teamSpeak.PlayerTalking ? 1 : 0);
+            this.AttachDelegate("MMO_Teamspeak_ClientCount", () => _teamSpeak.ClientCount);
+            for (int i = 1; i <= 15; i++)
+            {
+                int slot = i;
+                this.AttachDelegate("MMO_Teamspeak_" + slot + "_Name", () => _teamSpeak.GetClientName(slot));
+                this.AttachDelegate("MMO_Teamspeak_" + slot + "_Status", () => _teamSpeak.GetClientStatus(slot));
+                this.AttachDelegate("MMO_Teamspeak_" + slot + "_Talking", () => _teamSpeak.GetClientTalking(slot) ? 1 : 0);
+            }
 
             this.AttachDelegate(
                 name: "MMO_InvalidLap",
@@ -931,7 +951,9 @@ namespace MMOPlugin
                 _showLastPitLapAndTimeInRelative,
                 SetShowLastPitLapAndTimeInRelative,
                 _lastLaptimeDisplayDurationMs,
-                SetLastLaptimeDisplayDuration
+                SetLastLaptimeDisplayDuration,
+                GetTeamSpeakApiKey,
+                SetTeamSpeakApiKey
             );
         }
 
@@ -1029,6 +1051,34 @@ namespace MMOPlugin
             }
         }
 
+        private string _teamSpeakApiKey = "";
+
+        private string GetTeamSpeakApiKey() { return _teamSpeakApiKey; }
+
+        private void SetTeamSpeakApiKey(string value)
+        {
+            _teamSpeakApiKey = (value ?? "").Trim();
+            _teamSpeak.Configure(_teamSpeakApiKey);
+            SavePluginSettings();
+        }
+
+        private void LoadTeamSpeakApiKey()
+        {
+            try
+            {
+                if (!File.Exists(SettingsFilePath)) return;
+                foreach (string line in File.ReadAllLines(SettingsFilePath))
+                {
+                    if (!line.StartsWith("TeamSpeakApiKeyProtected=", StringComparison.Ordinal)) continue;
+                    byte[] encrypted = Convert.FromBase64String(line.Substring(line.IndexOf('=') + 1));
+                    _teamSpeakApiKey = Encoding.UTF8.GetString(ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser));
+                    _teamSpeak.Configure(_teamSpeakApiKey);
+                    break;
+                }
+            }
+            catch { _teamSpeakApiKey = ""; }
+        }
+
         private void SetShowTeamNamesInLeaderboard(bool value)
         {
             _showTeamNamesInsteadOfDriverNames = value;
@@ -1086,7 +1136,8 @@ namespace MMOPlugin
                     "TyreCompoundSymbol=" + _tyreCompoundSymbolMode,
                     "LastLaptimeDisplayDurationMs=" + _lastLaptimeDisplayDurationMs,
                     "LeaderboardShowLastPitLapAndTimeDuringRace=" + _showLastPitLapAndTimeInLeaderboard,
-                    "RelativeShowLastPitLapAndTimeDuringRace=" + _showLastPitLapAndTimeInRelative
+                    "RelativeShowLastPitLapAndTimeDuringRace=" + _showLastPitLapAndTimeInRelative,
+                    "TeamSpeakApiKeyProtected=" + (string.IsNullOrEmpty(_teamSpeakApiKey) ? "" : Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(_teamSpeakApiKey), null, DataProtectionScope.CurrentUser)))
                 });
             }
             catch
@@ -1110,6 +1161,9 @@ namespace MMOPlugin
                 "MMO_SettingsLastLaptimeDisplayDuration",
                 "MMO_SettingsLeaderboardShowLastPitLapAndTimeDuringRace",
                 "MMO_SettingsRelativeShowLastPitLapAndTimeDuringRace",
+                "MMO_Teamspeak_Connected", "MMO_Teamspeak_Status", "MMO_Teamspeak_ServerName",
+                "MMO_Teamspeak_ChannelName", "MMO_Teamspeak_PlayerName", "MMO_Teamspeak_PlayerStatus",
+                "MMO_Teamspeak_PlayerTalking", "MMO_Teamspeak_ClientCount",
                 "MMO_InvalidLap",
                 "MMO_PlayerInc",
                 "MMO_maxIncidents",
@@ -1120,6 +1174,13 @@ namespace MMOPlugin
                 "MMO_RelativeBehind2",
                 "MMO_RelativeBehind3"
             };
+
+            for (int i = 1; i <= 15; i++)
+            {
+                names.Add("MMO_Teamspeak_" + i + "_Name");
+                names.Add("MMO_Teamspeak_" + i + "_Status");
+                names.Add("MMO_Teamspeak_" + i + "_Talking");
+            }
 
             string[] playerSuffixes =
             {
@@ -2787,8 +2848,303 @@ namespace MMOPlugin
         public void End(
             PluginManager pluginManager)
         {
+            _teamSpeak.Dispose();
             _standingsApi.Dispose();
             _sharedMemory.Dispose();
+        }
+    }
+
+    internal sealed class TeamSpeakClientQuery : IDisposable
+    {
+        private readonly object _gate = new object();
+        private readonly Thread _worker;
+        private readonly Thread _talkWorker;
+        private volatile bool _stopping;
+        private string _apiKey = "";
+        private string _activeSchandlerId = "";
+        private readonly Dictionary<string, bool> _talkingByClientId = new Dictionary<string, bool>();
+        private Snapshot _snapshot = new Snapshot();
+
+        private sealed class Snapshot
+        {
+            public bool Connected;
+            public string Status = "Not configured";
+            public string Server = "";
+            public string Channel = "";
+            public string Player = "";
+            public int PlayerStatus;
+            public bool PlayerTalking;
+            public int Count;
+            public readonly string[] Names = new string[15];
+            public readonly int[] Statuses = new int[15];
+            public readonly bool[] Talking = new bool[15];
+            public readonly string[] ClientIds = new string[15];
+            public string PlayerId = "";
+            public string SchandlerId = "";
+        }
+
+        public TeamSpeakClientQuery()
+        {
+            _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "MMO TeamSpeak ClientQuery" };
+            _talkWorker = new Thread(TalkStatusWorkerLoop) { IsBackground = true, Name = "MMO TeamSpeak Talk Status" };
+            _worker.Start();
+            _talkWorker.Start();
+        }
+
+        public void Configure(string key) { _apiKey = key ?? ""; }
+        public bool Connected { get { lock (_gate) return _snapshot.Connected; } }
+        public string Status { get { lock (_gate) return _snapshot.Status; } }
+        public string ServerName { get { lock (_gate) return _snapshot.Server; } }
+        public string ChannelName { get { lock (_gate) return _snapshot.Channel; } }
+        public string PlayerName { get { lock (_gate) return _snapshot.Player; } }
+        public int PlayerStatus { get { lock (_gate) return _snapshot.PlayerStatus; } }
+        public bool PlayerTalking { get { lock (_gate) return _snapshot.PlayerTalking; } }
+        public int ClientCount { get { lock (_gate) return _snapshot.Count; } }
+        public string GetClientName(int index) { lock (_gate) return index > 0 && index <= 15 ? _snapshot.Names[index - 1] ?? "" : ""; }
+        public int GetClientStatus(int index) { lock (_gate) return index > 0 && index <= 15 ? _snapshot.Statuses[index - 1] : 0; }
+        public bool GetClientTalking(int index) { lock (_gate) return index > 0 && index <= 15 && _snapshot.Talking[index - 1]; }
+
+        private void WorkerLoop()
+        {
+            while (!_stopping)
+            {
+                string key = _apiKey;
+                if (string.IsNullOrEmpty(key))
+                {
+                    Publish(new Snapshot { Status = "Not configured" });
+                    Thread.Sleep(500);
+                    continue;
+                }
+                try { Poll(key); }
+                catch (Exception ex)
+                {
+                    Publish(new Snapshot { Status = "ClientQuery unavailable: " + ex.Message });
+                }
+                Thread.Sleep(1000);
+            }
+        }
+
+        private void Poll(string key)
+        {
+            using (TcpClient client = new TcpClient())
+            {
+                client.ReceiveTimeout = 3500;
+                client.SendTimeout = 3500;
+                client.Connect("127.0.0.1", 25639);
+                using (NetworkStream stream = client.GetStream())
+                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8, false, 1024, true))
+                using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true) { AutoFlush = true, NewLine = "\r\n" })
+                {
+                    // ClientQuery 1.5 sends a fixed four-line greeting. Do not wait
+                    // for a blank line: the greeting has no blank-line terminator.
+                    for (int greetingLine = 0; greetingLine < 4; greetingLine++)
+                    {
+                        if (reader.ReadLine() == null)
+                            throw new IOException("ClientQuery closed during its greeting");
+                    }
+                    Send(writer, reader, "auth apikey=" + Escape(key));
+                    string selectedHandler = Value(ParseRecords(Send(writer, reader, "use")), "schandlerid");
+                    lock (_gate) _activeSchandlerId = selectedHandler;
+                    List<Dictionary<string, string>> who = ParseRecords(Send(writer, reader, "whoami"));
+                    if (who.Count == 0) throw new IOException("No active TeamSpeak server");
+                    string clid = Get(who[0], "clid");
+                    string channelId = Get(who[0], "client_channel_id");
+                    if (string.IsNullOrEmpty(channelId)) channelId = Get(who[0], "cid");
+                    List<Dictionary<string, string>> clients = ParseRecords(Send(writer, reader, "clientlist -voice"));
+                    Dictionary<string, string> own = null;
+                    List<Dictionary<string, string>> channelClients = new List<Dictionary<string, string>>();
+                    foreach (Dictionary<string, string> row in clients)
+                    {
+                        if (Get(row, "clid") == clid) own = row;
+                        if (Get(row, "cid") == channelId) channelClients.Add(row);
+                    }
+                    List<Dictionary<string, string>> serverInfo = ParseRecords(Send(writer, reader, "servervariable virtualserver_name"));
+                    List<Dictionary<string, string>> channelInfo = string.IsNullOrEmpty(channelId)
+                        ? new List<Dictionary<string, string>>()
+                        : ParseRecords(Send(writer, reader, "channelvariable cid=" + Escape(channelId) + " channel_name"));
+                    Snapshot result = new Snapshot { Connected = true, Status = "Connected", Server = Value(serverInfo, "virtualserver_name"), Channel = Value(channelInfo, "channel_name"), Count = channelClients.Count, SchandlerId = selectedHandler };
+                    if (own != null)
+                    {
+                        result.Player = Decode(Get(own, "client_nickname"));
+                        result.PlayerStatus = StatusBits(own);
+                        result.PlayerId = Get(own, "clid");
+                    }
+                    if (string.IsNullOrEmpty(result.Player))
+                        result.Player = Decode(Get(who[0], "client_nickname"));
+                    for (int i = 0; i < Math.Min(15, channelClients.Count); i++)
+                    {
+                        Dictionary<string, string> row = channelClients[i];
+                        result.Names[i] = Decode(Get(row, "client_nickname"));
+                        result.Statuses[i] = StatusBits(row);
+                        result.ClientIds[i] = Get(row, "clid");
+                    }
+                    RefreshTalkSnapshot(result, clients);
+                    Publish(result);
+                }
+            }
+        }
+
+        private static int StatusBits(Dictionary<string, string> row)
+        {
+            int value = 0;
+            if (Get(row, "client_input_muted") == "1") value |= 1;
+            if (Get(row, "client_output_muted") == "1") value |= 2;
+            return value;
+        }
+
+        private void RefreshTalkSnapshot(Snapshot snapshot, List<Dictionary<string, string>> clients)
+        {
+            lock (_gate)
+            {
+                HashSet<string> currentIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (Dictionary<string, string> row in clients)
+                {
+                    string id = Get(row, "clid");
+                    if (string.IsNullOrEmpty(id)) continue;
+                    currentIds.Add(id);
+                    if (!_talkingByClientId.ContainsKey(id))
+                        _talkingByClientId[id] = Get(row, "client_flag_talking") == "1";
+                }
+                List<string> stale = new List<string>();
+                foreach (string id in _talkingByClientId.Keys)
+                    if (!currentIds.Contains(id)) stale.Add(id);
+                foreach (string id in stale) _talkingByClientId.Remove(id);
+
+                bool playerTalking;
+                if (_talkingByClientId.TryGetValue(snapshot.PlayerId, out playerTalking))
+                    snapshot.PlayerTalking = playerTalking;
+                for (int i = 0; i < snapshot.ClientIds.Length; i++)
+                {
+                    bool talking;
+                    if (_talkingByClientId.TryGetValue(snapshot.ClientIds[i] ?? "", out talking))
+                        snapshot.Talking[i] = talking;
+                }
+            }
+        }
+
+        private void TalkStatusWorkerLoop()
+        {
+            while (!_stopping)
+            {
+                string key = _apiKey;
+                if (string.IsNullOrEmpty(key)) { Thread.Sleep(500); continue; }
+                try { WatchTalkStatus(key); }
+                catch { if (!_stopping) Thread.Sleep(1000); }
+            }
+        }
+
+        private void WatchTalkStatus(string key)
+        {
+            using (TcpClient client = new TcpClient())
+            {
+                client.ReceiveTimeout = 1000;
+                client.SendTimeout = 3500;
+                client.Connect("127.0.0.1", 25639);
+                using (NetworkStream stream = client.GetStream())
+                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8, false, 1024, true))
+                using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true) { AutoFlush = true, NewLine = "\r\n" })
+                {
+                    for (int i = 0; i < 4; i++)
+                        if (reader.ReadLine() == null) throw new IOException("ClientQuery closed during its greeting");
+                    Send(writer, reader, "auth apikey=" + Escape(key));
+                    Send(writer, reader, "use");
+                    Send(writer, reader, "clientnotifyregister schandlerid=0 event=notifytalkstatuschange");
+                    while (!_stopping && string.Equals(key, _apiKey, StringComparison.Ordinal))
+                    {
+                        string line;
+                        try { line = reader.ReadLine(); }
+                        catch (IOException ex)
+                        {
+                            SocketException socketError = ex.InnerException as SocketException;
+                            if (socketError != null && (socketError.SocketErrorCode == SocketError.TimedOut || socketError.SocketErrorCode == SocketError.WouldBlock))
+                                continue;
+                            throw;
+                        }
+                        if (line == null) throw new IOException("ClientQuery event connection closed");
+                        if (!line.StartsWith("notifytalkstatuschange ", StringComparison.Ordinal)) continue;
+                        List<Dictionary<string, string>> records = ParseRecords(line);
+                        if (records.Count == 0) continue;
+                        Dictionary<string, string> notification = records[0];
+                        string handler = Get(notification, "schandlerid");
+                        string clientId = Get(notification, "clid");
+                        int talkStatus;
+                        if (string.IsNullOrEmpty(clientId) || !int.TryParse(Get(notification, "status"), out talkStatus)) continue;
+                        lock (_gate)
+                        {
+                            if (!string.IsNullOrEmpty(handler) && !string.IsNullOrEmpty(_activeSchandlerId) && handler != _activeSchandlerId)
+                                continue;
+                            _talkingByClientId[clientId] = talkStatus == 1;
+                            if (_snapshot.PlayerId == clientId) _snapshot.PlayerTalking = talkStatus == 1;
+                            for (int i = 0; i < _snapshot.ClientIds.Length; i++)
+                                if (_snapshot.ClientIds[i] == clientId) _snapshot.Talking[i] = talkStatus == 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        private static string Send(StreamWriter writer, StreamReader reader, string command)
+        {
+            writer.WriteLine(command);
+            StringBuilder response = new StringBuilder();
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (response.Length > 0) response.Append(' ');
+                response.Append(line);
+                if (line.StartsWith("error id=", StringComparison.Ordinal))
+                {
+                    if (!line.StartsWith("error id=0 ", StringComparison.Ordinal))
+                        throw new IOException("ClientQuery command '" + command + "' failed: " + line);
+                    return response.ToString();
+                }
+            }
+            throw new IOException("ClientQuery connection closed");
+        }
+
+        private static List<Dictionary<string, string>> ParseRecords(string response)
+        {
+            List<Dictionary<string, string>> result = new List<Dictionary<string, string>>();
+            string data = Regex.Replace(response ?? "", @"\s*error id=[^\s]+.*$", "");
+            foreach (string record in data.Split('|'))
+            {
+                Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string item in record.Split(' '))
+                {
+                    int equals = item.IndexOf('=');
+                    if (equals > 0) values[item.Substring(0, equals)] = Unescape(item.Substring(equals + 1));
+                }
+                if (values.Count > 0) result.Add(values);
+            }
+            return result;
+        }
+
+        private static string Value(List<Dictionary<string, string>> rows, string key) { return rows.Count == 0 ? "" : Get(rows[0], key); }
+        private static string Get(Dictionary<string, string> row, string key) { string value; return row != null && row.TryGetValue(key, out value) ? value : ""; }
+        private static string Escape(string value) { return (value ?? "").Replace("\\", "\\\\").Replace(" ", "\\s").Replace("|", "\\p"); }
+        private static string Decode(string value) { return Unescape(value); }
+        private static string Unescape(string value)
+        {
+            return (value ?? "").Replace("\\s", " ").Replace("\\p", "|").Replace("\\/", "/").Replace("\\\\", "\\").Replace("\\n", "\n").Replace("\\r", "\r");
+        }
+        private void Publish(Snapshot snapshot)
+        {
+            lock (_gate)
+            {
+                bool talking;
+                if (_talkingByClientId.TryGetValue(snapshot.PlayerId ?? "", out talking))
+                    snapshot.PlayerTalking = talking;
+                for (int i = 0; i < snapshot.ClientIds.Length; i++)
+                    if (_talkingByClientId.TryGetValue(snapshot.ClientIds[i] ?? "", out talking))
+                        snapshot.Talking[i] = talking;
+                _snapshot = snapshot;
+            }
+        }
+        public void Dispose()
+        {
+            _stopping = true;
+            if (_worker != null && _worker.IsAlive) _worker.Join(1500);
+            if (_talkWorker != null && _talkWorker.IsAlive) _talkWorker.Join(1500);
         }
     }
 
@@ -2811,6 +3167,7 @@ namespace MMOPlugin
         private Button _installAllOverlaysButton;
         private Button _updateAllOverlaysButton;
         private TextBlock _overlayStatus;
+        private TextBlock _pluginUpdateFirstHint;
         private ListView _overlayList;
         private TabItem _overlaysTab;
         private Border _overlayUpdateBadge;
@@ -2829,6 +3186,12 @@ namespace MMOPlugin
         private readonly Action<int> _setLastLaptimeDisplayDuration;
         private readonly Action<bool> _setShowLastPitLapAndTimeInLeaderboard;
         private readonly Action<bool> _setShowLastPitLapAndTimeInRelative;
+        private readonly Func<string> _getTeamSpeakApiKey;
+        private readonly Action<string> _setTeamSpeakApiKey;
+        private readonly PasswordBox _teamSpeakKeyPassword;
+        private readonly TextBox _teamSpeakKeyVisible;
+        private readonly CheckBox _showTeamSpeakKey;
+        private TabItem _settingsTab;
         private GitHubRelease _latestRelease;
         private bool _checkingUpdate;
         private bool _installingUpdate;
@@ -2892,7 +3255,9 @@ namespace MMOPlugin
             bool showLastPitLapAndTimeInRelative,
             Action<bool> setShowLastPitLapAndTimeInRelative,
             int lastLaptimeDisplayDurationMs,
-            Action<int> setLastLaptimeDisplayDuration)
+            Action<int> setLastLaptimeDisplayDuration,
+            Func<string> getTeamSpeakApiKey,
+            Action<string> setTeamSpeakApiKey)
         {
             _pluginManager = pluginManager;
             _propertyNames = propertyNames ?? new List<string>();
@@ -2902,6 +3267,8 @@ namespace MMOPlugin
             _setLastLaptimeDisplayDuration = setLastLaptimeDisplayDuration;
             _setShowLastPitLapAndTimeInLeaderboard = setShowLastPitLapAndTimeInLeaderboard;
             _setShowLastPitLapAndTimeInRelative = setShowLastPitLapAndTimeInRelative;
+            _getTeamSpeakApiKey = getTeamSpeakApiKey;
+            _setTeamSpeakApiKey = setTeamSpeakApiKey;
             Background = Brushes.Transparent;
             Foreground = Brushes.White;
             _searchBox = new TextBox
@@ -3024,6 +3391,9 @@ namespace MMOPlugin
                 FontSize = 13,
                 Margin = new Thickness(0, 12, 0, 6)
             };
+            _teamSpeakKeyPassword = new PasswordBox { MinWidth = 280, Password = _getTeamSpeakApiKey() ?? "" };
+            _teamSpeakKeyVisible = new TextBox { MinWidth = 280, Text = _getTeamSpeakApiKey() ?? "", Visibility = Visibility.Collapsed };
+            _showTeamSpeakKey = new CheckBox { Content = "Show key", Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
 
             Grid root = new Grid
             {
@@ -3255,6 +3625,17 @@ namespace MMOPlugin
                 MaxWidth = 520,
                 Margin = new Thickness(0, 4, 0, 0)
             });
+            generalOptions.Children.Add(new TextBlock { Text = "TeamSpeak ClientQuery API Key", FontSize = 13, Margin = new Thickness(0, 16, 0, 6) });
+            StackPanel keyInput = new StackPanel { Orientation = Orientation.Horizontal };
+            keyInput.Children.Add(_teamSpeakKeyPassword);
+            keyInput.Children.Add(_teamSpeakKeyVisible);
+            keyInput.Children.Add(_showTeamSpeakKey);
+            generalOptions.Children.Add(keyInput);
+            generalOptions.Children.Add(new TextBlock
+            {
+                Text = "Connects to the local TeamSpeak ClientQuery service. The key is protected for this Windows user.",
+                Opacity = 0.7, FontSize = 11, TextWrapping = TextWrapping.Wrap, MaxWidth = 520, Margin = new Thickness(0, 4, 0, 0)
+            });
 
             StackPanel settingsPage = new StackPanel
             {
@@ -3337,12 +3718,28 @@ namespace MMOPlugin
                 Content = root
             });
             BuildOverlaysPage(tabs);
-            tabs.Items.Add(new TabItem
+            _settingsTab = new TabItem
             {
                 Header = CreateTabHeader("Settings"),
                 Content = settingsPage
-            });
+            };
+            tabs.Items.Add(_settingsTab);
             tabs.SelectionChanged += PluginTabs_SelectionChanged;
+
+            _teamSpeakKeyPassword.PasswordChanged += (s, e) =>
+            {
+                if (_teamSpeakKeyVisible.Text != _teamSpeakKeyPassword.Password)
+                    _teamSpeakKeyVisible.Text = _teamSpeakKeyPassword.Password;
+                _setTeamSpeakApiKey(_teamSpeakKeyPassword.Password);
+            };
+            _teamSpeakKeyVisible.TextChanged += (s, e) =>
+            {
+                if (_teamSpeakKeyPassword.Password != _teamSpeakKeyVisible.Text)
+                    _teamSpeakKeyPassword.Password = _teamSpeakKeyVisible.Text;
+                _setTeamSpeakApiKey(_teamSpeakKeyVisible.Text);
+            };
+            _showTeamSpeakKey.Checked += (s, e) => SetTeamSpeakKeyVisible(true);
+            _showTeamSpeakKey.Unchecked += (s, e) => SetTeamSpeakKeyVisible(false);
 
             Content = tabs;
             ApplyPropertyFilter();
@@ -3358,6 +3755,16 @@ namespace MMOPlugin
                 Margin = new Thickness(0, 0, 12, 0),
                 FontSize = 12,
                 Foreground = Brushes.White
+            };
+            _pluginUpdateFirstHint = new TextBlock
+            {
+                Text = "Update plugin first",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 5, 12, 0),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.Orange,
+                Visibility = Visibility.Collapsed
             };
             _checkOverlaysButton = new Button
             {
@@ -3394,7 +3801,10 @@ namespace MMOPlugin
             DockPanel statusPanel = new DockPanel { LastChildFill = true };
             DockPanel.SetDock(actions, Dock.Right);
             statusPanel.Children.Add(actions);
-            statusPanel.Children.Add(_overlayStatus);
+            StackPanel statusText = new StackPanel();
+            statusText.Children.Add(_overlayStatus);
+            statusText.Children.Add(_pluginUpdateFirstHint);
+            statusPanel.Children.Add(statusText);
 
             _overlayList = new ListView
             {
@@ -3485,8 +3895,18 @@ namespace MMOPlugin
         {
             TabControl tabs = sender as TabControl;
             if (tabs != null && ReferenceEquals(e.OriginalSource, tabs) &&
+                ReferenceEquals(tabs.SelectedItem, _settingsTab))
+                SetTeamSpeakKeyVisible(false);
+            if (tabs != null && ReferenceEquals(e.OriginalSource, tabs) &&
                 ReferenceEquals(tabs.SelectedItem, _overlaysTab))
                 await CheckOverlaysAsync();
+        }
+
+        private void SetTeamSpeakKeyVisible(bool visible)
+        {
+            if (!visible) _showTeamSpeakKey.IsChecked = false;
+            _teamSpeakKeyPassword.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
+            _teamSpeakKeyVisible.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void RefreshOverlayList()
@@ -3573,6 +3993,13 @@ namespace MMOPlugin
             _updateAllOverlaysButton.ToolTip = PluginIsCurrent
                 ? null
                 : "Update MMO Plugin before installing or updating overlays.";
+            if (_pluginUpdateFirstHint != null)
+            {
+                _pluginUpdateFirstHint.Visibility =
+                    _pluginUpdateStatusKnown && _pluginUpdateAvailable
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+            }
             SetUpdateBadge(_overlayUpdateBadge, _overlayItems.Exists(item => item.NeedsUpdate));
         }
 
