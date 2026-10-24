@@ -38,7 +38,7 @@ namespace MMOPlugin
     [PluginDescription("Plugin required for Kevins MMO Overlays. Enable left menu for Options!")]
     public class MMOPlugin : IPlugin, IDataPlugin, IWPFSettingsV2
     {
-        public const string PluginVersion = "0.3.1.0";
+        public const string PluginVersion = "0.3.1.1";
         private static readonly string SettingsFilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SimHub",
@@ -171,6 +171,53 @@ namespace MMOPlugin
             return ids;
         }
 
+        private void AttachSafeDelegate(string name, Func<object> valueProvider)
+        {
+            this.AttachDelegate(
+                name: name,
+                valueProvider: () =>
+                {
+                    object value = valueProvider == null ? null : valueProvider();
+                    if (value == null)
+                        return IsTextProperty(name) ? (object)string.Empty : 0;
+
+                    if (value is double)
+                    {
+                        double number = (double)value;
+                        if (double.IsNaN(number) || double.IsInfinity(number)) return 0.0;
+                    }
+                    else if (value is float)
+                    {
+                        float number = (float)value;
+                        if (float.IsNaN(number) || float.IsInfinity(number)) return 0.0f;
+                    }
+                    return value;
+                }
+            );
+        }
+
+        private static bool IsTextProperty(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            return name == "MMO_ConnectionStatus" ||
+                   name == "MMO_TrackName" ||
+                   name == "MMO_ApiConnectionStatus" ||
+                   name == "MMO_ApiLastError" ||
+                   name == "MMO_Teamspeak_Status" ||
+                   name == "MMO_Teamspeak_ServerName" ||
+                   name == "MMO_Teamspeak_ChannelName" ||
+                   name == "MMO_Teamspeak_PlayerName" ||
+                   name.EndsWith("_Name", StringComparison.Ordinal) ||
+                   name.EndsWith("CarNumber", StringComparison.Ordinal) ||
+                   name.EndsWith("CarClass", StringComparison.Ordinal) ||
+                   name.EndsWith("DriverName", StringComparison.Ordinal) ||
+                   name.EndsWith("DriveNameRelative", StringComparison.Ordinal) ||
+                   name.EndsWith("TeamName", StringComparison.Ordinal) ||
+                   name.EndsWith("PitStatus", StringComparison.Ordinal) ||
+                   name.EndsWith("PitTime", StringComparison.Ordinal) ||
+                   name.IndexOf("TyreComp", StringComparison.Ordinal) >= 0;
+        }
+
         public void Init(PluginManager pluginManager)
         {
             PluginManager = pluginManager;
@@ -180,7 +227,7 @@ namespace MMOPlugin
             LoadTeamSpeakApiKey();
             ClearTrackLimitPoints();
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_ConnectionStatus",
                 valueProvider: () =>
                     _sharedMemory.IsConnected
@@ -188,7 +235,7 @@ namespace MMOPlugin
                         : "Waiting for LMU"
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_TrackName",
                 valueProvider: () =>
                     _hasScoringInfo
@@ -196,7 +243,7 @@ namespace MMOPlugin
                         : ""
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_VehicleCount",
                 valueProvider: () =>
                     _hasScoringInfo
@@ -204,7 +251,7 @@ namespace MMOPlugin
                         : 0
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_ApiConnectionStatus",
                 valueProvider: () =>
                     _standingsApi.IsConnected
@@ -212,59 +259,59 @@ namespace MMOPlugin
                         : "Waiting for LMU API"
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_ApiLastError",
                 valueProvider: () =>
                     _standingsApi.LastError
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_SettingsShowTeamNamesInLeaderboard",
                 valueProvider: () => _showTeamNamesInsteadOfDriverNames ? 1 : 0
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_SettingsAdditionalTeamNamesInRelative",
                 valueProvider: () => _additionalTeamNamesInRelative ? 1 : 0
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_SettingsTyreCompoundSymbol",
                 valueProvider: () => _tyreCompoundSymbolMode
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_SettingsLastLaptimeDisplayDuration",
                 valueProvider: () => _lastLaptimeDisplayDurationMs
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_SettingsLeaderboardShowLastPitLapAndTimeDuringRace",
                 valueProvider: () => _showLastPitLapAndTimeInLeaderboard ? 1 : 0
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_SettingsRelativeShowLastPitLapAndTimeDuringRace",
                 valueProvider: () => _showLastPitLapAndTimeInRelative ? 1 : 0
             );
 
-            this.AttachDelegate("MMO_Teamspeak_Connected", () => _teamSpeak.Connected ? 1 : 0);
-            this.AttachDelegate("MMO_Teamspeak_Status", () => _teamSpeak.Status);
-            this.AttachDelegate("MMO_Teamspeak_ServerName", () => _teamSpeak.ServerName);
-            this.AttachDelegate("MMO_Teamspeak_ChannelName", () => _teamSpeak.ChannelName);
-            this.AttachDelegate("MMO_Teamspeak_PlayerName", () => _teamSpeak.PlayerName);
-            this.AttachDelegate("MMO_Teamspeak_PlayerStatus", () => _teamSpeak.PlayerStatus);
-            this.AttachDelegate("MMO_Teamspeak_PlayerTalking", () => _teamSpeak.PlayerTalking ? 1 : 0);
-            this.AttachDelegate("MMO_Teamspeak_ClientCount", () => _teamSpeak.ClientCount);
+            AttachSafeDelegate("MMO_Teamspeak_Connected", () => _teamSpeak.Connected ? 1 : 0);
+            AttachSafeDelegate("MMO_Teamspeak_Status", () => _teamSpeak.Status);
+            AttachSafeDelegate("MMO_Teamspeak_ServerName", () => _teamSpeak.ServerName);
+            AttachSafeDelegate("MMO_Teamspeak_ChannelName", () => _teamSpeak.ChannelName);
+            AttachSafeDelegate("MMO_Teamspeak_PlayerName", () => _teamSpeak.PlayerName);
+            AttachSafeDelegate("MMO_Teamspeak_PlayerStatus", () => _teamSpeak.PlayerStatus);
+            AttachSafeDelegate("MMO_Teamspeak_PlayerTalking", () => _teamSpeak.PlayerTalking ? 1 : 0);
+            AttachSafeDelegate("MMO_Teamspeak_ClientCount", () => _teamSpeak.ClientCount);
             for (int i = 1; i <= 15; i++)
             {
                 int slot = i;
-                this.AttachDelegate("MMO_Teamspeak_" + slot + "_Name", () => _teamSpeak.GetClientName(slot));
-                this.AttachDelegate("MMO_Teamspeak_" + slot + "_Status", () => _teamSpeak.GetClientStatus(slot));
-                this.AttachDelegate("MMO_Teamspeak_" + slot + "_Talking", () => _teamSpeak.GetClientTalking(slot) ? 1 : 0);
+                AttachSafeDelegate("MMO_Teamspeak_" + slot + "_Name", () => _teamSpeak.GetClientName(slot));
+                AttachSafeDelegate("MMO_Teamspeak_" + slot + "_Status", () => _teamSpeak.GetClientStatus(slot));
+                AttachSafeDelegate("MMO_Teamspeak_" + slot + "_Talking", () => _teamSpeak.GetClientTalking(slot) ? 1 : 0);
             }
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_InvalidLap",
                 valueProvider: () =>
                 {
@@ -288,44 +335,44 @@ namespace MMOPlugin
                 }
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_PlayerInc",
                 valueProvider: () => _playerIncidents
             );
 
             // -1 means the session's configured track-limit threshold is not available
             // through the shared-memory fields currently mapped by this plugin.
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_maxIncidents",
                 valueProvider: () => -1
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_RelativeAhead1",
                 valueProvider: () => _relativeAhead[0]
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_RelativeAhead2",
                 valueProvider: () => _relativeAhead[1]
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_RelativeAhead3",
                 valueProvider: () => _relativeAhead[2]
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_RelativeBehind1",
                 valueProvider: () => _relativeBehind[0]
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_RelativeBehind2",
                 valueProvider: () => _relativeBehind[1]
             );
 
-            this.AttachDelegate(
+            AttachSafeDelegate(
                 name: "MMO_RelativeBehind3",
                 valueProvider: () => _relativeBehind[2]
             );
@@ -341,7 +388,7 @@ namespace MMOPlugin
                 string positionName =
                     capturedPosition.ToString(CultureInfo.InvariantCulture);
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -359,7 +406,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -377,7 +424,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -395,7 +442,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -413,27 +460,27 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name: "MMO_Position" + positionName + "TyreCompFL",
                     valueProvider: () => GetTyreCompound(capturedPosition, 0)
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name: "MMO_Position" + positionName + "TyreCompFR",
                     valueProvider: () => GetTyreCompound(capturedPosition, 1)
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name: "MMO_Position" + positionName + "TyreCompRL",
                     valueProvider: () => GetTyreCompound(capturedPosition, 2)
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name: "MMO_Position" + positionName + "TyreCompRR",
                     valueProvider: () => GetTyreCompound(capturedPosition, 3)
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -454,7 +501,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name: "MMO_Position" + positionName + "DriveNameRelative",
                     valueProvider: () =>
                     {
@@ -471,7 +518,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -489,7 +536,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -507,7 +554,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -515,12 +562,12 @@ namespace MMOPlugin
                     valueProvider: () => GetLastLapTime(capturedPosition)
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name: "MMO_Position" + positionName + "LastLaptimePopup",
                     valueProvider: () => GetLastLaptimePopup(capturedPosition)
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -548,7 +595,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -575,7 +622,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -591,19 +638,19 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name: "MMO_Position" + positionName + "PitLap",
                     valueProvider: () => GetPitStopState(capturedPosition).PitLap
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name: "MMO_Position" + positionName + "PitTime",
                     valueProvider: () => GetPitTimeSeconds(
                         GetPitStopState(capturedPosition).LastPitTimeSeconds
                     )
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -622,7 +669,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -640,7 +687,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -649,7 +696,7 @@ namespace MMOPlugin
                         _incidentsByPosition[capturedPosition - 1]
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -671,7 +718,7 @@ namespace MMOPlugin
                     }
                 );
 
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     name:
                         "MMO_Position" +
                         positionName +
@@ -773,30 +820,30 @@ namespace MMOPlugin
 
         private void RegisterPlayerProperties()
         {
-            this.AttachDelegate("MMO_PlayerRelativeAhead1", () => _relativeAhead[0]);
-            this.AttachDelegate("MMO_PlayerRelativeAhead2", () => _relativeAhead[1]);
-            this.AttachDelegate("MMO_PlayerRelativeAhead3", () => _relativeAhead[2]);
-            this.AttachDelegate("MMO_PlayerRelativeBehind1", () => _relativeBehind[0]);
-            this.AttachDelegate("MMO_PlayerRelativeBehind2", () => _relativeBehind[1]);
-            this.AttachDelegate("MMO_PlayerRelativeBehind3", () => _relativeBehind[2]);
+            AttachSafeDelegate("MMO_PlayerRelativeAhead1", () => _relativeAhead[0]);
+            AttachSafeDelegate("MMO_PlayerRelativeAhead2", () => _relativeAhead[1]);
+            AttachSafeDelegate("MMO_PlayerRelativeAhead3", () => _relativeAhead[2]);
+            AttachSafeDelegate("MMO_PlayerRelativeBehind1", () => _relativeBehind[0]);
+            AttachSafeDelegate("MMO_PlayerRelativeBehind2", () => _relativeBehind[1]);
+            AttachSafeDelegate("MMO_PlayerRelativeBehind3", () => _relativeBehind[2]);
 
-            this.AttachDelegate("MMO_PlayerOverall", () =>
+            AttachSafeDelegate("MMO_PlayerOverall", () =>
             {
                 int position;
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out position);
                 return vehicle != null ? vehicle.Position : position;
             });
-            this.AttachDelegate("MMO_PlayerClass", () =>
+            AttachSafeDelegate("MMO_PlayerClass", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 return vehicle != null ? vehicle.PositionClass : 0;
             });
-            this.AttachDelegate("MMO_PlayerCarNumber", () =>
+            AttachSafeDelegate("MMO_PlayerCarNumber", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 return vehicle != null ? vehicle.CarNumber ?? "" : "";
             });
-            this.AttachDelegate("MMO_PlayerCarClass", () =>
+            AttachSafeDelegate("MMO_PlayerCarClass", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 return vehicle != null ? vehicle.CarClass ?? "" : "";
@@ -806,7 +853,7 @@ namespace MMOPlugin
             for (int wheel = 0; wheel < wheelNames.Length; wheel++)
             {
                 int capturedWheel = wheel;
-                this.AttachDelegate(
+                AttachSafeDelegate(
                     "MMO_PlayerTyreComp" + wheelNames[wheel],
                     () =>
                     {
@@ -818,7 +865,7 @@ namespace MMOPlugin
                 );
             }
 
-            this.AttachDelegate("MMO_PlayerDriverName", () =>
+            AttachSafeDelegate("MMO_PlayerDriverName", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 if (vehicle == null) return "";
@@ -826,7 +873,7 @@ namespace MMOPlugin
                     ? vehicle.TeamName ?? ""
                     : FormatDriverName(vehicle.DriverName);
             });
-            this.AttachDelegate("MMO_PlayerDriveNameRelative", () =>
+            AttachSafeDelegate("MMO_PlayerDriveNameRelative", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 if (vehicle == null) return "";
@@ -835,21 +882,21 @@ namespace MMOPlugin
                     ? FormatRelativeDriverName(driverName, vehicle.TeamName)
                     : driverName;
             });
-            this.AttachDelegate("MMO_PlayerTeamName", () =>
+            AttachSafeDelegate("MMO_PlayerTeamName", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 return vehicle != null ? vehicle.TeamName ?? "" : "";
             });
-            this.AttachDelegate("MMO_PlayerBestLaptime", () =>
+            AttachSafeDelegate("MMO_PlayerBestLaptime", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 return vehicle != null ? vehicle.BestLapTime : 0.0;
             });
-            this.AttachDelegate("MMO_PlayerLastLaptime", () =>
+            AttachSafeDelegate("MMO_PlayerLastLaptime", () =>
             {
                 return GetLastLapTimeForPlayer();
             });
-            this.AttachDelegate("MMO_PlayerGapToLeader", () =>
+            AttachSafeDelegate("MMO_PlayerGapToLeader", () =>
             {
                 int position;
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out position);
@@ -857,7 +904,7 @@ namespace MMOPlugin
                     ? GetGapValue(vehicle.GapToLeader, GetLapsBehindClassLeader(position, vehicle))
                     : 0.0;
             });
-            this.AttachDelegate("MMO_PlayerIntervalToNext", () =>
+            AttachSafeDelegate("MMO_PlayerIntervalToNext", () =>
             {
                 int position;
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out position);
@@ -865,57 +912,57 @@ namespace MMOPlugin
                     ? GetGapValue(vehicle.IntervalToNext, GetLapsBehindNext(position))
                     : 0.0;
             });
-            this.AttachDelegate("MMO_PlayerPitStatus", () =>
+            AttachSafeDelegate("MMO_PlayerPitStatus", () =>
             {
                 int position;
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out position);
                 return GetPitStatus(position, vehicle);
             });
-            this.AttachDelegate("MMO_PlayerPitLap", () =>
+            AttachSafeDelegate("MMO_PlayerPitLap", () =>
                 GetPitStopStateByVehicleId(_lastPlayerVehicleId).PitLap
             );
-            this.AttachDelegate("MMO_PlayerPitTime", () =>
+            AttachSafeDelegate("MMO_PlayerPitTime", () =>
                 GetPitTimeSeconds(
                     GetPitStopStateByVehicleId(_lastPlayerVehicleId).LastPitTimeSeconds
                 )
             );
-            this.AttachDelegate("MMO_PlayerVirtualEnergy", () =>
+            AttachSafeDelegate("MMO_PlayerVirtualEnergy", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 return vehicle != null
                     ? GetVirtualEnergy(vehicle.VeFraction)
                     : 0.0;
             });
-            this.AttachDelegate("MMO_PlayerVELap", () =>
+            AttachSafeDelegate("MMO_PlayerVELap", () =>
                 GetCurrentVeLevel() > 0.0
                     ? (object)_playerConsumption.LastVePerLap
                     : "");
-            this.AttachDelegate("MMO_PlayerFuelLap", () => _playerConsumption.LastFuelPerLap);
-            this.AttachDelegate("MMO_PlayerVEAvg3Laps", () =>
+            AttachSafeDelegate("MMO_PlayerFuelLap", () => _playerConsumption.LastFuelPerLap);
+            AttachSafeDelegate("MMO_PlayerVEAvg3Laps", () =>
                 GetCurrentVeLevel() > 0.0
                     ? (object)AverageLastLaps(_playerConsumption.VeLapHistory)
                     : "");
-            this.AttachDelegate("MMO_PlayerVELapsLeft", () =>
+            AttachSafeDelegate("MMO_PlayerVELapsLeft", () =>
                 GetCurrentVeLevel() > 0.0
                     ? (object)CalculateLapsLeft(
                         GetCurrentVeLevel(),
                         AverageLastLaps(_playerConsumption.VeLapHistory))
                     : "");
-            this.AttachDelegate("MMO_PlayerFuelLapsLeft", () =>
+            AttachSafeDelegate("MMO_PlayerFuelLapsLeft", () =>
                 CalculateLapsLeft(
                     GetCurrentFuelLevel(),
                     AverageLastLaps(_playerConsumption.FuelLapHistory)));
-            this.AttachDelegate("MMO_PlayerRefuelVE", () =>
+            AttachSafeDelegate("MMO_PlayerRefuelVE", () =>
                 GetCurrentVeLevel() > 0.0
                     ? (object)GetVeNeededToFinish()
                     : "");
-            this.AttachDelegate("MMO_PlayerPenalties", () =>
+            AttachSafeDelegate("MMO_PlayerPenalties", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 return vehicle != null ? vehicle.Penalties : 0;
             });
-            this.AttachDelegate("MMO_PlayerIncidents", () => _playerIncidents);
-            this.AttachDelegate("MMO_PlayerInvalidLap", () =>
+            AttachSafeDelegate("MMO_PlayerIncidents", () => _playerIncidents);
+            AttachSafeDelegate("MMO_PlayerInvalidLap", () =>
             {
                 int position;
                 LMUVehicleScoring scoring;
@@ -923,7 +970,7 @@ namespace MMOPlugin
                     ? 1
                     : 0;
             });
-            this.AttachDelegate("MMO_PlayerFinishStatus", () =>
+            AttachSafeDelegate("MMO_PlayerFinishStatus", () =>
             {
                 LMUApiVehicle vehicle = GetPlayerApiVehicle(out _);
                 return vehicle != null && !string.IsNullOrEmpty(vehicle.FinishStatus) &&
