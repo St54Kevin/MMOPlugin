@@ -38,7 +38,7 @@ namespace MMOPlugin
     [PluginDescription("Plugin required for Kevins MMO Overlays. Enable left menu for Options!")]
     public class MMOPlugin : IPlugin, IDataPlugin, IWPFSettingsV2
     {
-        public const string PluginVersion = "0.3.1.1";
+        public const string PluginVersion = "0.3.1.2";
         private static readonly string SettingsFilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SimHub",
@@ -2908,6 +2908,7 @@ namespace MMOPlugin
         private readonly Thread _talkWorker;
         private volatile bool _stopping;
         private string _apiKey = "";
+        private DateTime _lastSuccessfulPollUtc = DateTime.MinValue;
         private string _activeSchandlerId = "";
         private readonly Dictionary<string, bool> _talkingByClientId = new Dictionary<string, bool>();
         private Snapshot _snapshot = new Snapshot();
@@ -2938,8 +2939,27 @@ namespace MMOPlugin
             _talkWorker.Start();
         }
 
-        public void Configure(string key) { _apiKey = key ?? ""; }
-        public bool Connected { get { lock (_gate) return _snapshot.Connected; } }
+        public void Configure(string key)
+        {
+            _apiKey = key ?? "";
+            if (string.IsNullOrEmpty(_apiKey))
+            {
+                lock (_gate)
+                    _lastSuccessfulPollUtc = DateTime.MinValue;
+            }
+        }
+        public bool Connected
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _snapshot.Connected ||
+                        (_lastSuccessfulPollUtc != DateTime.MinValue &&
+                         DateTime.UtcNow - _lastSuccessfulPollUtc <= TimeSpan.FromSeconds(5));
+                }
+            }
+        }
         public string Status { get { lock (_gate) return _snapshot.Status; } }
         public string ServerName { get { lock (_gate) return _snapshot.Server; } }
         public string ChannelName { get { lock (_gate) return _snapshot.Channel; } }
@@ -3178,6 +3198,8 @@ namespace MMOPlugin
         {
             lock (_gate)
             {
+                if (snapshot.Connected)
+                    _lastSuccessfulPollUtc = DateTime.UtcNow;
                 bool talking;
                 if (_talkingByClientId.TryGetValue(snapshot.PlayerId ?? "", out talking))
                     snapshot.PlayerTalking = talking;
