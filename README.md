@@ -16,8 +16,30 @@ The project is maintained by **Kevin_Karas**. The overlay suite builds on the or
 - Configurable settings for leaderboard team names, relative team labels, tyre-compound symbols, and pit-stop information.
 - A plugin page with live property values, version/update checks, and an overlay package page that compares installed overlay versions with the latest release.
 
-The plugin publishes properties under the `MMOPlugin.MMO_...` namespace. Property values can be used directly in SimHub Dash Studio and NCalc formulas.
+The plugin publishes properties under the `MMOPlugin.MMO_...` namespace, including position-based properties and player-specific `MMO_Player...` values. Property values can be used directly in SimHub Dash Studio and NCalc formulas.
 
+## Plugin pages
+
+The plugin menu contains the following pages:
+
+| Page | What it provides |
+|---|---|
+| **Plugin** | Searchable live properties. With no search term, the list stays empty; matching values refresh every 10 seconds while the SimHub window is in the foreground and pause in the background. **Hide empty properties** is enabled by default. |
+| **Overlays** | Checks the latest available overlay ZIP and compares each dashboard's metadata version with the installed SimHub overlay. It offers individual or package-wide install/update actions. The plugin must be up to date before overlay updates can run. |
+| **Settings** | Leaderboard and Relative display options, tyre-compound display rules, last-lap popup duration, TeamSpeak ClientQuery key, and optional debugging logs. The TeamSpeak key is masked by default and protected for the current Windows user. |
+| **Controls** | Configure SimHub input bindings to increase or decrease the persistent FuelTarget in 0.02 steps. The target uses VE for cars with Virtual Energy and fuel otherwise. |
+| **Data** | Per-car/per-track completed-lap statistics, best lap and its timestamp, average consumption, and FuelTarget. Filter by car and track, export/import a backup, reset all records, or right-click a record to delete it. The plugin also keeps the newest automatic statistics backup before plugin updates. |
+| **Changelog** | Lists GitHub releases and their notes. A cached copy is available when GitHub cannot be reached. |
+
+Overlay installation and updates are confirmed with a prompt. The plugin backs up its statistics before a plugin update and keeps only the newest automatic backup.
+
+## Additional plugin features
+
+- **Stint laps:** `StintLap` is available for the player and each car. It begins at the race start or garage exit, resets after a confirmed refuelling or tyre service, and does not reset for a drive-through or Stop-and-Go penalty.
+- **Position changes:** `prevPosition` and `PositionGain` support position-change markers and configurable green/red name coding in race sessions.
+- **Track-limit incidents:** `MMO_PlayerIncidents` and `MMO_IncidentsLimit` expose the player's current incident points and the session limit when LMU supplies them.
+- **TeamSpeak 3:** Local ClientQuery integration exposes connection, server/channel, player and up to 15 client names, mute states, and live talking states. Configure the ClientQuery API key in Settings; it is stored protected for the current Windows user.
+- **Consumption history:** Complete-lap fuel and VE samples are saved per car/track combination. Historical averages can supply a starting consumption value at the beginning of a session while live readings are not yet available.
 ## Overlay overview
 
 The overlay package contains the following displays. Names and versions can vary between package releases.
@@ -33,7 +55,8 @@ The overlay package contains the following displays. Names and versions can vary
 | **MMO - SectorBox** | Sector-time information in a separate timing box. |
 | **MMO - TireInfoHor** | Horizontal tyre telemetry widget, including tyre and brake temperatures, pressures, wear and compounds when supplied by LMU. |
 | **MMO - TireInfoVer** | Vertical layout of the tyre telemetry widget. |
-| **MMO - Map** | Track map display. |
+| **MMO - TrackMap** | Track map display. |
+| **MMO - TeamSpeak** | A TeamSpeak overlay for the connected channel, client names, mute states, and talking indicators. |
 
 The suite also includes leaderboard/relative variants and tyre displays described on the [original OverTake page](https://www.overtake.gg/downloads/lmu-simhub-mmo-modern-multiclass-overlay-standings-relative-tires.74112/). Available items depend on the overlay package version.
 
@@ -78,4 +101,6 @@ The plugin and overlay suite are maintained by Kevin_Karas. Third-party librarie
 
 - **Plugin and overlay suite:** Kevin_Karas
 - **Original overlay release and feature background:** [OverTake.gg](https://www.overtake.gg/downloads/lmu-simhub-mmo-modern-multiclass-overlay-standings-relative-tires.74112/)
+
+
 
