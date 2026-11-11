@@ -137,7 +137,7 @@ Die Telemetriestruktur ist 1888 Byte groß. Nur die folgenden Felder sind im Pro
 |---|---:|---|---|
 | `mID` | 0 | `int` | Verknüpft Telemetrie mit Scoring-Fahrzeug |
 | `mLapStartET` | 24 | `double` | Rundenstartzeit; derzeit nicht für die Berechnung verwendet (die Berechnung nimmt `LMUVehicleScoring.mLapStartET`) |
-| `mTrackLimitsSteps` | 776 | `byte` | Wird als Incident-/Track-Limit-Zähler pro Fahrzeug und Spieler verwendet |
+| `mTrackLimitsSteps` | 767 | `byte` | Wird als Incident-/Track-Limit-Zähler pro Fahrzeug und Spieler verwendet |
 | `mTimeGapCarAhead` | 780 | `float` | Zeitabstand zum Auto vor diesem Fahrzeug; interne Relative-Werte |
 | `mTimeGapCarBehind` | 784 | `float` | Zeitabstand zum Auto hinter diesem Fahrzeug; interne Relative-Werte |
 | `mTimeGapPlaceAhead` | 788 | `float` | Zeitabstand zur Platzierung davor; verfügbar, Verwendung im Relative-Fallback prüfen |

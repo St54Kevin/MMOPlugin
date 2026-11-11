@@ -48,6 +48,8 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Xaml" />
     <Reference Include="System.Security" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -57,18 +59,25 @@
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Xml" />
+    <Reference Include="log4net">
+      <HintPath>D:\Program Files (x86)\SimHub\log4net.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="MMOPlugin.cs.cs" />
+    <Compile Include="CarTrackStatisticsStore.cs" />
     <Compile Include="LMUScoringInfo.cs" />
     <Compile Include="LMUSharedMemory.cs" />
     <Compile Include="LMUStandingsApi.cs" />
     <Compile Include="LMUVehicleScoring.cs" />
+    <Compile Include="PluginPerformanceDiagnostics.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="rsz_logo_transp.png" />
+    <Resource Include="rsz_logo_sidebar.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
